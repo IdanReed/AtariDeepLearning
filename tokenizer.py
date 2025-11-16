@@ -9,7 +9,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-from encoder_patch import AtariPatchEncoder
+from baseline_encoder import AtariPatchEncoder
 
 
 @dataclass
