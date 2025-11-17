@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import multiprocessing
+import random
 
 import torch
 from torch import nn
@@ -58,84 +59,150 @@ def collate_fn(batch):
     return list(obs_paths), torch.stack(actions, dim=0), torch.stack(rtg, dim=0)
 
 
+def create_train_test_dataloaders(
+    sequences_by_game: dict,
+    train_fraction: float = 0.8,
+    total_frac: float = 1.0,
+    context_len: int = 32,
+    batch_size: int = 32,
+    num_workers: int = 16,
+    shuffle_train: bool = True,
+    seed: int | None = None,
+) -> tuple[DataLoader, DataLoader]:
+    """
+    Split sequences_by_game into train and test sets and create DataLoaders.
+    
+    Args:
+        sequences_by_game: dict mapping game paths to lists of sequence dicts
+        train_fraction: fraction of sequences to use for training (default 0.8)
+        total_frac: fraction of total sequences to use (default 1.0, use all).
+                    Useful for quick training on a smaller subset.
+        context_len: context length for sliding windows
+        batch_size: batch size for both dataloaders
+        num_workers: number of worker processes for both dataloaders
+        shuffle_train: whether to shuffle the training dataloader
+        seed: random seed for reproducibility (optional)
+    
+    Returns:
+        tuple of (train_loader, test_loader)
+    """
+    if seed is not None:
+        random.seed(seed)
+    
+    # Split sequences for each game
+    train_sequences_by_game = {}
+    test_sequences_by_game = {}
+    
+    for game, sequences in sequences_by_game.items():
+        # Shuffle sequences for this game
+        sequences_shuffled = sequences.copy()
+        random.shuffle(sequences_shuffled)
+        
+        # Optionally reduce total dataset size (after shuffling for randomness)
+        if total_frac < 1.0:
+            n_total = int(len(sequences_shuffled) * total_frac)
+            sequences_shuffled = sequences_shuffled[:n_total]
+        
+        # Split based on train_fraction
+        n_train = int(len(sequences_shuffled) * train_fraction)
+        train_sequences_by_game[game] = sequences_shuffled[:n_train]
+        test_sequences_by_game[game] = sequences_shuffled[n_train:]
+    
+    # Create datasets
+    train_dataset = AtariDataset(train_sequences_by_game, context_len=context_len)
+    test_dataset = AtariDataset(test_sequences_by_game, context_len=context_len)
+    
+    print(f"Train dataset length: {len(train_dataset)}")
+    print(f"Test dataset length: {len(test_dataset)}")
+    
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=shuffle_train,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        persistent_workers=False,
+    )
+    
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,  # Don't shuffle test set
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        persistent_workers=False,
+    )
+    
+    return train_loader, test_loader
+
+
 # ------------------------------------------------------------
 # 2. Main training function
 # ------------------------------------------------------------
-def train(sequences_by_game):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using device:", device)
-
-    # ---- data ----
-    # sequences_by_game = build_sequences_by_game("dataset/raw")
-    context_len = 32
-
-    dataset = AtariDataset(sequences_by_game, context_len=context_len)
-    print("Dataset length:", len(dataset))
-
-    batch_size = 32
-
-    # Configure DataLoader for Windows multiprocessing
-    # Use spawn context explicitly for Windows compatibility
-    import multiprocessing as mp
-    # mp_context = mp.get_context('spawn')
+def train(
+    model: MultiGameDecisionTransformer,
+    tokenizer: MGDTTokenizer,
+    train_loader: DataLoader,
+    test_loader: DataLoader | None = None,
+    num_epochs: int = 1,
+    learning_rate: float = 1e-4,
+    device: torch.device | None = None,
+    img_loader: AtariImageLoader | None = None,
+    n_actions: int | None = None,
+    n_games: int = 1,
+    grad_clip_norm: float = 1.0,
+    stop_file_path: str | Path = "stop",
+    eval_every_n_epochs: int = 1,
+) -> MultiGameDecisionTransformer:
+    """
+    Train a Multi-Game Decision Transformer model.
     
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=16,
-        collate_fn=collate_fn,
-        persistent_workers=False,  # Don't persist workers (Windows compatibility)
-        # pin_memory=False,  # Disable pin_memory for Windows
-        # multiprocessing_context=mp_context,  # Use spawn method explicitly
-    )
-
-    # Image loader (Phase 1)
-    img_loader = AtariImageLoader(img_size=84, grayscale=True)
-
-    # Patch encoder (Phase 2)
-    d_model = 128
-    patch_encoder = AtariPatchEncoder(
-        img_size=84,
-        patch_size=14,
-        in_channels=1,
-        d_model=d_model,
-    ).to(device)
-
-    # Tokenizer (Phase 3)
-    n_actions = dataset.n_actions()
-    tokenizer = MGDTTokenizer(
-        patch_encoder=patch_encoder,
-        n_actions=n_actions,
-        n_games=1,      # single-game setup for now
-        rtg_min=-20,
-        rtg_max=100,
-    ).to(device)
-
-    # Transformer (Phase 4)
-    model = MultiGameDecisionTransformer(
-        d_model=d_model,
-        n_actions=n_actions,
-        n_layers=2,      # small to start
-        n_heads=4,
-        dim_feedforward=4 * d_model,
-        dropout=0.1,
-        max_seq_len=2048,
-    ).to(device)
-
+    Args:
+        model: The model to train
+        tokenizer: The tokenizer to use for encoding inputs
+        train_loader: DataLoader for training data
+        test_loader: Optional DataLoader for test/validation data
+        num_epochs: Number of training epochs
+        learning_rate: Learning rate for optimizer
+        device: Device to train on (defaults to cuda if available, else cpu)
+        img_loader: Image loader for loading frames (defaults to AtariImageLoader)
+        n_actions: Number of actions (inferred from train_loader.dataset if not provided)
+        n_games: Number of games (for game_id generation)
+        grad_clip_norm: Gradient clipping norm
+        stop_file_path: Path to stop file for graceful stopping
+        eval_every_n_epochs: Evaluate on test set every N epochs (0 to disable)
+    
+    Returns:
+        The trained model
+    """
+    # Set device
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
+    
+    # Move model to device
+    model = model.to(device)
+    tokenizer = tokenizer.to(device)
+    
+    # Get n_actions from dataset if not provided
+    if n_actions is None:
+        n_actions = train_loader.dataset.n_actions()
+    
+    # Create image loader if not provided
+    if img_loader is None:
+        img_loader = AtariImageLoader(img_size=84, grayscale=True)
+    
     # ---- optimization ----
-    lr = 1e-4
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()
+    
+    # Stop file path
+    stop_file = Path(stop_file_path)
 
     # --------------------------------------------------------
     # 3. Training loop
     # --------------------------------------------------------
-    num_epochs = 1  # bump this later
-    
-    # Stop file path - check for this file to gracefully stop training
-    stop_file = Path("stop")
-
     # Outer loop: epochs
     for epoch in range(1, num_epochs + 1):
         tqdm.write(f"Epoch {epoch}/{num_epochs}")
@@ -151,8 +218,8 @@ def train(sequences_by_game):
 
         # Inner loop: batches
         batch_pbar = tqdm(
-            enumerate(loader),
-            total=len(loader),
+            enumerate(train_loader),
+            total=len(train_loader),
             desc=f"Epoch {epoch}/{num_epochs}",
             leave=False,
         )
@@ -200,7 +267,7 @@ def train(sequences_by_game):
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
             optimizer.step()
 
             total_loss += loss.item() * B * T
@@ -219,7 +286,51 @@ def train(sequences_by_game):
             break
 
         epoch_loss = total_loss / max(total_tokens, 1)
-        tqdm.write(f"Epoch {epoch} done. Avg loss: {epoch_loss:.4f}")
+        tqdm.write(f"Epoch {epoch} done. Train loss: {epoch_loss:.4f}")
+        
+        # Evaluate on test set if provided
+        if test_loader is not None and eval_every_n_epochs > 0 and epoch % eval_every_n_epochs == 0:
+            model.eval()
+            tokenizer.eval()
+            test_total_loss = 0.0
+            test_total_tokens = 0
+            
+            with torch.no_grad():
+                for obs_paths_batch, actions_batch, rtg_batch in test_loader:
+                    B, T = actions_batch.shape
+                    
+                    # Load images
+                    frames = img_loader.load_batch(obs_paths_batch)
+                    frames = frames.to(device)
+                    actions = actions_batch.to(device)
+                    rtg = rtg_batch.to(device)
+                    game_ids = torch.zeros(B, dtype=torch.long, device=device)
+                    
+                    # Tokenize
+                    tok_out = tokenizer(
+                        frames=frames,
+                        actions=actions,
+                        rtg=rtg,
+                        game_ids=game_ids,
+                    )
+                    tokens = tok_out.tokens
+                    S = tok_out.tokens_per_step
+                    
+                    # Forward pass
+                    out = model(tokens, tokens_per_step=S, T=T)
+                    logits = out.logits
+                    
+                    # Loss
+                    loss = criterion(
+                        logits.view(B * T, n_actions),
+                        actions.view(B * T),
+                    )
+                    
+                    test_total_loss += loss.item() * B * T
+                    test_total_tokens += B * T
+            
+            test_loss = test_total_loss / max(test_total_tokens, 1)
+            tqdm.write(f"Epoch {epoch} test loss: {test_loss:.4f}")
     
     # Clean up stop file if it exists
     if stop_file.exists():

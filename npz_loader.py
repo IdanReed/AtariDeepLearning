@@ -24,19 +24,20 @@ def discover_game_npz_paths(paths: list[Path]) -> Dict[str, Any]:
     return game_npz_paths
 
 def get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
-    # Game -> npz files each represents one sequence
-    game_to_sequences: Dict[Path, List[np.lib.npyio.NpzFile]] = {}
+    # Game -> dicts each represents one sequence
+    game_to_sequences: Dict[Path, List[dict]] = {}
 
     for game, npz_paths in game_npz_paths.items():
         game_path = Path(game)
         game_to_sequences[game_path] = []
         for npz_path in npz_paths:
-            game_to_sequences[game_path].append(np.load(npz_path))
-
-    return fix_obs_paths(game_to_sequences)
+            npz_file = np.load(npz_path)
+            game_to_sequences[game_path].append(dict(npz_file))
+    
+    return game_to_sequences
 
 def fix_obs_paths(
-    game_to_sequences: Dict[Path, List[np.lib.npyio.NpzFile]],
+    game_to_sequences: Dict[Path, List[dict]],
     dataset_root: str | Path = "dataset",
 ):
     """
@@ -54,10 +55,9 @@ def fix_obs_paths(
 
         fixed_seqs: List[dict] = []
 
-        for npz in seqs:
-            seq_dict: dict = {}
-            for key in npz.files:
-                arr = npz[key]
+        for seq_dict in seqs:
+            fixed_seq_dict: dict = {}
+            for key, arr in seq_dict.items():
 
                 if key == "obs" and arr.dtype.kind in ("U", "S", "O"):
                     # rewrite each path string
@@ -82,9 +82,9 @@ def fix_obs_paths(
 
                     arr = np.array(new_obs, dtype=arr.dtype)
 
-                seq_dict[key] = arr
+                fixed_seq_dict[key] = arr
 
-            fixed_seqs.append(seq_dict)
+            fixed_seqs.append(fixed_seq_dict)
 
         fixed[game_path] = fixed_seqs
 
