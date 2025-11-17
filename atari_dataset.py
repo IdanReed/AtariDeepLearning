@@ -1,10 +1,13 @@
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from pathlib import Path
+from PIL import Image
+from torchvision import transforms
 
 
 class AtariDataset(Dataset):
-    def __init__(self, sequences_by_game, context_len: int = 16):
+    def __init__(self, sequences_by_game, context_len: int = 16, img_size: int = 84, grayscale: bool = True):
         """
         sequences_by_game: dict[game, list[sequence_dict]]
           where each sequence_dict has keys:
@@ -15,10 +18,19 @@ class AtariDataset(Dataset):
 
         This dataset creates overlapping windows of length `context_len` over
         each sequence and returns:
-          obs_window, action_window, return_to_go_window
+          frames (tensor), action_window, return_to_go_window
         """
         self.context_len = context_len
+        self.img_size = img_size
+        self.grayscale = grayscale
         self.samples = []
+        
+        # Build transform pipeline for image loading
+        tfs = [transforms.Resize((img_size, img_size))]
+        if grayscale:
+            tfs.append(transforms.Grayscale(num_output_channels=1))
+        tfs.append(transforms.ToTensor())  # -> (C,H,W), values in [0,1]
+        self.transform = transforms.Compose(tfs)
 
         # Precompute returns-to-go per sequence and build sliding windows
         for game, seqs in sequences_by_game.items():
@@ -66,6 +78,19 @@ class AtariDataset(Dataset):
 
         self._n_actions = None
 
+    def _load_image(self, path: str) -> torch.Tensor:
+        """
+        Load and transform a single image.
+        
+        Args:
+            path: Path to image file
+            
+        Returns:
+            Tensor of shape (C, H, W)
+        """
+        img = Image.open(path).convert("RGB")
+        return self.transform(img)
+
     """
     Determines the number of unique actions across all samples in the dataset
     """
@@ -88,8 +113,9 @@ class AtariDataset(Dataset):
         seq, start = self.samples[idx]
         end = start + self.context_len
 
-        # (context_len,) array of strings (relative image paths)
-        obs = seq["obs"][start:end]
+        # Load images here (in worker process for parallel loading)
+        obs_paths = seq["obs"][start:end]  # (context_len,) array of strings
+        frames = torch.stack([self._load_image(str(p)) for p in obs_paths], dim=0)  # (T, C, H, W)
 
         # actions: (context_len, 1) or (context_len,) -> (context_len,)
         actions = seq["taken actions"][start:end]
@@ -101,7 +127,5 @@ class AtariDataset(Dataset):
         rtg = seq["returns_to_go"][start:end].astype(np.float32)
         rtg = torch.from_numpy(rtg).float()
 
-        # For DT you’d typically feed:
-        #   (rtg, states, actions, timesteps)
-        # Here we provide: obs (paths), actions, rtg
-        return obs, actions, rtg
+        # Return: frames (tensor), actions, rtg
+        return frames, actions, rtg
