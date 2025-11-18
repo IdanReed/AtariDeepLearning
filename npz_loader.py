@@ -49,9 +49,8 @@ def fix_obs_paths(
     for game_path, seqs in game_to_sequences.items():
         game_path = Path(game_path)
 
-        # Example game_path: dataset/raw/BeamRiderNoFrameskip-v4/BeamRiderNoFrameskip-v4
-        top_game_dir = game_path.parent.name  # 'BeamRiderNoFrameskip-v4'
-        inner_game_dir = game_path.name       # 'BeamRiderNoFrameskip-v4'
+        top_game_dir = game_path.parent.name 
+        inner_game_dir = game_path.name
 
         fixed_seqs: List[dict] = []
 
@@ -60,7 +59,7 @@ def fix_obs_paths(
             for key, arr in seq_dict.items():
 
                 if key == "obs" and arr.dtype.kind in ("U", "S", "O"):
-                    # rewrite each path string
+                    
                     new_obs = []
                     for s in arr:
                         p = Path(str(s))

@@ -176,6 +176,24 @@ def _analyze_actions(train_data: dict, test_data: dict, save_dir: Path, show_plo
     train_valid = np.all((train_actions_flat >= 0) & (train_actions_flat < n_actions))
     test_valid = np.all((test_actions_flat >= 0) & (test_actions_flat < n_actions))
     
+    # Calculate action change statistics (number of times action changes per sequence)
+    train_action_changes = []
+    for i in range(train_actions.shape[0]):
+        seq = train_actions[i].numpy()
+        # Count number of times action changes (diff != 0)
+        changes = np.sum(np.diff(seq) != 0)
+        train_action_changes.append(changes)
+    
+    test_action_changes = []
+    for i in range(test_actions.shape[0]):
+        seq = test_actions[i].numpy()
+        # Count number of times action changes (diff != 0)
+        changes = np.sum(np.diff(seq) != 0)
+        test_action_changes.append(changes)
+    
+    train_action_changes = np.array(train_action_changes)
+    test_action_changes = np.array(test_action_changes)
+    
     stats = {
         'n_actions': n_actions,
         'train_min': int(train_actions_flat.min()),
@@ -186,10 +204,20 @@ def _analyze_actions(train_data: dict, test_data: dict, save_dir: Path, show_plo
         'test_unique': test_unique,
         'train_valid': bool(train_valid),
         'test_valid': bool(test_valid),
+        # Action change statistics
+        'train_action_changes_mean': float(train_action_changes.mean()),
+        'train_action_changes_std': float(train_action_changes.std()),
+        'train_action_changes_min': int(train_action_changes.min()),
+        'train_action_changes_max': int(train_action_changes.max()),
+        'test_action_changes_mean': float(test_action_changes.mean()),
+        'test_action_changes_std': float(test_action_changes.std()),
+        'test_action_changes_min': int(test_action_changes.min()),
+        'test_action_changes_max': int(test_action_changes.max()),
     }
     
     # Plot 1: Action frequency histogram (train vs test)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    ax1, ax2, ax3 = axes
     
     ax1.hist(train_actions_flat, bins=n_actions, alpha=0.7, label='Train', color='blue', edgecolor='black')
     ax1.hist(test_actions_flat, bins=n_actions, alpha=0.7, label='Test', color='red', edgecolor='black')
@@ -219,6 +247,17 @@ def _analyze_actions(train_data: dict, test_data: dict, save_dir: Path, show_plo
     ax2.legend()
     ax2.grid(True, alpha=0.3, axis='y')
     
+    # Plot 3: Action change distribution (number of action changes per sequence)
+    max_changes = max(train_action_changes.max(), test_action_changes.max())
+    bins = min(30, int(max_changes) + 1)  # Limit bins for readability
+    ax3.hist(train_action_changes, bins=bins, alpha=0.7, label='Train', color='blue', edgecolor='black', density=True)
+    ax3.hist(test_action_changes, bins=bins, alpha=0.7, label='Test', color='red', edgecolor='black', density=True)
+    ax3.set_xlabel('Number of Action Changes per Sequence')
+    ax3.set_ylabel('Density')
+    ax3.set_title('Action Change Frequency Distribution')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3, axis='y')
+    
     plt.tight_layout()
     plot_path = save_dir / "action_distribution.png"
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
@@ -226,6 +265,13 @@ def _analyze_actions(train_data: dict, test_data: dict, save_dir: Path, show_plo
         plt.show()
     else:
         plt.close()
+    
+    # Print action change statistics
+    print("\n=== Action Change Statistics ===")
+    print(f"Train - Mean changes per sequence: {stats['train_action_changes_mean']:.2f} ± {stats['train_action_changes_std']:.2f}")
+    print(f"Train - Range: [{stats['train_action_changes_min']}, {stats['train_action_changes_max']}]")
+    print(f"Test  - Mean changes per sequence: {stats['test_action_changes_mean']:.2f} ± {stats['test_action_changes_std']:.2f}")
+    print(f"Test  - Range: [{stats['test_action_changes_min']}, {stats['test_action_changes_max']}]")
     
     stats['plot_path'] = str(plot_path)
     return stats
@@ -702,8 +748,10 @@ def _compare_splits(train_data: dict, test_data: dict, save_dir: Path, show_plot
 
 def _visualize_samples(train_data: dict, test_data: dict, save_dir: Path, show_plots: bool) -> dict:
     """Generate sample visualizations."""
+    import random
+
     # Image grid
-    n_samples = 20
+    n_samples = 4
     train_frames = train_data['frames']
     test_frames = test_data['frames']
     
@@ -738,45 +786,46 @@ def _visualize_samples(train_data: dict, test_data: dict, save_dir: Path, show_p
         ax.axis('off')
     
     # Action sequences (spanning 2 columns in the second-to-last row, starting at column 1)
+    seq_count = 50
     ax1 = plt.subplot(n_rows_total, n_cols, (n_rows_total - 1) * n_cols + 1)
     train_actions = train_data['actions']
-    for i in range(min(3, train_actions.shape[0])):
-        ax1.plot(train_actions[i].numpy(), alpha=0.6, label=f'Train seq {i}')
+    for i in range(min(seq_count, train_actions.shape[0])):
+        ax1.plot(random.choice(train_actions).numpy(), alpha=0.6, label=f'Train seq {i}')
     ax1.set_xlabel('Time Step')
     ax1.set_ylabel('Action ID')
     ax1.set_title('Action Sequences (Train)')
-    ax1.legend()
+    # ax1.legend()
     ax1.grid(True, alpha=0.3)
     
     ax2 = plt.subplot(n_rows_total, n_cols, (n_rows_total - 1) * n_cols + 2)
     test_actions = test_data['actions']
-    for i in range(min(3, test_actions.shape[0])):
-        ax2.plot(test_actions[i].numpy(), alpha=0.6, label=f'Test seq {i}')
+    for i in range(min(seq_count, test_actions.shape[0])):
+        ax2.plot(random.choice(test_actions).numpy(), alpha=0.6, label=f'Test seq {i}')
     ax2.set_xlabel('Time Step')
     ax2.set_ylabel('Action ID')
     ax2.set_title('Action Sequences (Test)')
-    ax2.legend()
+    # ax2.legend()
     ax2.grid(True, alpha=0.3)
     
     # RTG trajectories (spanning 2 columns in the last row, starting at column 1)
     ax3 = plt.subplot(n_rows_total, n_cols, n_rows_total * n_cols - 1)
     train_rtg = train_data['rtg']
-    for i in range(min(3, train_rtg.shape[0])):
-        ax3.plot(train_rtg[i].numpy(), alpha=0.6, label=f'Train seq {i}')
+    for i in range(min(seq_count, train_rtg.shape[0])):
+        ax3.plot(random.choice(train_rtg).numpy(), alpha=0.6, label=f'Train seq {i}')
     ax3.set_xlabel('Time Step')
     ax3.set_ylabel('RTG Value')
     ax3.set_title('RTG Trajectories (Train)')
-    ax3.legend()
+    # ax3.legend()
     ax3.grid(True, alpha=0.3)
     
     ax4 = plt.subplot(n_rows_total, n_cols, n_rows_total * n_cols)
     test_rtg = test_data['rtg']
-    for i in range(min(3, test_rtg.shape[0])):
-        ax4.plot(test_rtg[i].numpy(), alpha=0.6, label=f'Test seq {i}')
+    for i in range(min(seq_count, test_rtg.shape[0])):
+        ax4.plot(random.choice(test_rtg).numpy(), alpha=0.6, label=f'Test seq {i}')
     ax4.set_xlabel('Time Step')
     ax4.set_ylabel('RTG Value')
     ax4.set_title('RTG Trajectories (Test)')
-    ax4.legend()
+    # ax4.legend()
     ax4.grid(True, alpha=0.3)
     
     plt.tight_layout()

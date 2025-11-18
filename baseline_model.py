@@ -19,17 +19,6 @@ class MGDTOutput:
 
 
 class MultiGameDecisionTransformer(nn.Module):
-    """
-    Causal transformer over flattened token sequences produced by MGDTTokenizer.
-
-    Input:
-      tokens: (B, L, d_model)
-      tokens_per_step: int   (e.g. 39 = 1 RTG + 1 GAME + 36 PATCH + 1 ACTION)
-      T: int                 number of timesteps per sequence
-
-    We assume the last token in each step is the action token.
-    """
-
     def __init__(
         self,
         d_model: int,
@@ -49,19 +38,20 @@ class MultiGameDecisionTransformer(nn.Module):
         # Positional embedding over flattened sequence positions [0..L-1]
         self.pos_embed = nn.Embedding(max_seq_len, d_model)
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,  # (B, L, D)
-            norm_first=True,
-        )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=n_layers,
-        )
+        # Decoder-only transformer: stack of decoder layers
+        # Create separate layer instances (not shared parameters)
+        self.decoder_layers = nn.ModuleList([
+            nn.TransformerDecoderLayer(
+                d_model=d_model,
+                nhead=n_heads,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation="gelu",
+                batch_first=True,  # (B, L, D)
+                norm_first=True,
+            )
+            for _ in range(n_layers)
+        ])
 
         # Predict discrete action logits from hidden states at action positions
         self.action_head = nn.Linear(d_model, n_actions)
@@ -107,11 +97,14 @@ class MultiGameDecisionTransformer(nn.Module):
         pos_ids = torch.arange(L, device=device).unsqueeze(0).expand(B, L)  # (B,L)
         x = tokens + self.pos_embed(pos_ids)  # (B,L,D)
 
-        # 2) Causal mask
+        # 2) Causal mask for decoder-only self-attention
         attn_mask = self._causal_mask(L, device)  # (L,L)
 
-        # 3) Transformer encoder
-        hidden = self.transformer(x, mask=attn_mask)  # (B,L,D)
+        # 3) Decoder-only transformer: pass memory=None to skip cross-attention
+        # This creates a decoder-only architecture with only causal self-attention
+        hidden = x
+        for decoder_layer in self.decoder_layers:
+            hidden = decoder_layer(tgt=hidden, memory=None, tgt_mask=attn_mask)  # (B,L,D)
 
         # 4) Select action token positions
         S = tokens_per_step

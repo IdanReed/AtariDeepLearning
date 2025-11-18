@@ -111,8 +111,9 @@ def create_train_test_dataloaders(
         if total_frac < 1.0:
             n_train_reduced = int(len(train_seqs) * total_frac)
             n_test_reduced = int(len(test_seqs) * total_frac)
-            train_sequences_by_game[game] = train_seqs[:n_train_reduced]
-            test_sequences_by_game[game] = test_seqs[:n_test_reduced]
+            # Randomly sample instead of taking first N to avoid bias
+            train_sequences_by_game[game] = random.sample(train_seqs, n_train_reduced)
+            test_sequences_by_game[game] = random.sample(test_seqs, n_test_reduced)
         else:
             train_sequences_by_game[game] = train_seqs
             test_sequences_by_game[game] = test_seqs
