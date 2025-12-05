@@ -130,20 +130,23 @@ def build_token_sequence(patch_seq, rtg_seq, actions, reward_seq):
     }
     """
     T = len(actions)
-    seq = []
+    #seq = []
+
+    states = []
+    actions_list = []
+    rtg = []
 
     for t in range(T):
         # 36 patch tokens
         nn_input = []
+        '''
         for m in range(PATCHES_PER_FRAME):
             nn_input.append(patch_seq[t, m].flatten())
-            '''
             seq.append({
                 "type": "patch",
                 "value": patch_seq[t, m],
                 "position": m
             })
-            '''
         seq.append({
             "type": "patch",
             "value": patch_emb(torch.tensor(nn_input, dtype=torch.float32))
@@ -160,7 +163,6 @@ def build_token_sequence(patch_seq, rtg_seq, actions, reward_seq):
             "type": "action",
             "value": int(actions[t])
         })
-        '''
         # Reward token
         seq.append({
             "type": "reward",
@@ -168,7 +170,18 @@ def build_token_sequence(patch_seq, rtg_seq, actions, reward_seq):
         })
         '''
 
-    return seq
+        for m in range(PATCHES_PER_FRAME):
+            nn_input.append(patch_seq[t, m].flatten())
+        # States token
+        states.append(patch_emb(torch.tensor(nn_input, dtype=torch.float32)))
+
+        # RTG token
+        rtg.append(int(rtg_seq[t]))
+
+        # Action token
+        actions_list.append(int(actions[t]))
+
+    return (states, actions_list, rtg)
 
 
 # ----------------------------------------------
