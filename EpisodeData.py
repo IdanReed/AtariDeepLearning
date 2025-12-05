@@ -22,7 +22,10 @@ class EpisodeData(Dataset):
         actions = [a for a in actions[start_timestamp:start_timestamp + self.context_length]]
         rtg = [r for r in rtg[start_timestamp:start_timestamp + self.context_length]]
 
-        states = torch.stack(states)
+        if isinstance(states[0], torch.Tensor):
+            states = torch.stack([s.detach().clone() for s in states])
+        else:
+            states = torch.stack(states)
         actions = torch.tensor(actions, dtype=torch.long)
         rtg = torch.tensor(rtg, dtype=torch.float32)
         #print(states.shape)
