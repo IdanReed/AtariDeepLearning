@@ -2,13 +2,16 @@ import os
 import cv2
 import numpy as np
 import torch
+import torch.nn as nn
 
 IMG_SIZE = 84
 PATCH_SIZE = 14
 PATCHES_PER_FRAME = (IMG_SIZE // PATCH_SIZE) ** 2    # 36 patches
 RETURN_MIN = -20
 RETURN_MAX = 100
+PATCH_EMB_SIZE = 128
 
+patch_emb = nn.Linear(PATCH_SIZE * PATCH_SIZE, PATCH_EMB_SIZE)
 
 # ----------------------------------------------
 # 1. Load an image from the dataset root
@@ -35,6 +38,7 @@ def find_image_folders(game_root: Path):
 def find_npz_files(game_root: Path):
     files = sorted(list(game_root.glob("*.npz")))
     return files
+
 
 
 def load_frame(dataset_root: Path, rel_path: str):
@@ -67,6 +71,15 @@ def frame_to_patches(frame):
             patches.append(patch)
     return np.stack(patches)  # shape (36,14,14)
 
+#Why do we use 14x14 patches?
+#14x14 patches strike a balance between capturing sufficient spatial detail
+#and keeping the sequence length manageable for transformer models.
+
+#Why do we have 36 patches per frame?
+#Dividing an 84x84 frame into 14x14 patches results in a 6x6 grid,
+#yielding 36 patches. This provides a detailed representation of the frame
+#while keeping the sequence length feasible for modeling.
+
 
 # ----------------------------------------------
 # 3. Discretize reward into {-1,0,+1}
@@ -79,6 +92,10 @@ def discretize_reward(r):
         return -1
     return 0
 
+#Why discretize?
+#In Atari games, rewards can vary widely in magnitude.
+#Discretizing them into -1, 0, and +1 simplifies the learning task for models,
+#focusing on the direction of reward rather than its exact value.
 
 # ----------------------------------------------
 # 4. Compute RTG and quantize
@@ -94,6 +111,10 @@ def compute_rtg(rewards):
     rtg = np.clip(rtg, RETURN_MIN, RETURN_MAX)
     rtg = rtg - RETURN_MIN  # shift to 0..120
     return rtg.astype(int)
+
+# Why do we have to clip from -20 to 100?
+# Because in Atari games, the total returns can vary widely.
+# Clipping helps to keep the RTG values within a manageable range for modeling.
 
 
 # ----------------------------------------------
@@ -113,11 +134,20 @@ def build_token_sequence(patch_seq, rtg_seq, actions, reward_seq):
 
     for t in range(T):
         # 36 patch tokens
+        nn_input = []
         for m in range(PATCHES_PER_FRAME):
+            nn_input.append(patch_seq[t, m].flatten())
+            '''
             seq.append({
                 "type": "patch",
-                "value": patch_seq[t, m]
+                "value": patch_seq[t, m],
+                "position": m
             })
+            '''
+        seq.append({
+            "type": "patch",
+            "value": patch_emb(torch.tensor(nn_input, dtype=torch.float32))
+        })
 
         # RTG token
         seq.append({
@@ -130,12 +160,13 @@ def build_token_sequence(patch_seq, rtg_seq, actions, reward_seq):
             "type": "action",
             "value": int(actions[t])
         })
-
+        '''
         # Reward token
         seq.append({
             "type": "reward",
             "value": int(reward_seq[t])
         })
+        '''
 
     return seq
 
@@ -167,7 +198,6 @@ def preprocess_one_sequence(npz_seq, game_root: Path, seq_index: int):
     frames = np.stack([
         load_frame(image_folder, p.name) for p in image_paths
     ])
-
     num_frames = frames.shape[0]
     num_steps = len(actions)
 
@@ -195,3 +225,7 @@ def preprocess_one_sequence(npz_seq, game_root: Path, seq_index: int):
     )
 
     return tokens
+
+def generate_batch(dataset):
+    data = []
+    return torch.tensor(data)
