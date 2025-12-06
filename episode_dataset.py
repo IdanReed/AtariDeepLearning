@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
@@ -19,7 +20,7 @@ def load_frame(
     img = img.convert("RGB")
 
     if resize_to is not None:
-        # Idk if we need this but might as well force images to be the same size in case some are weird
+        # Force images to the same size
         img = img.resize(resize_to, resample=Image.BILINEAR)
 
     arr = np.array(img, dtype=np.float32) / 255.0
@@ -50,6 +51,28 @@ def compute_rtg_bin_range(episodes: List[Episode]) -> Tuple[int, int]:
     return min(rtg_ints), max(rtg_ints)
 
 
+def compute_n_actions(episodes: List[Episode]) -> int:
+    max_action: Optional[int] = None
+    for episode in episodes:
+        for ts in episode.timesteps:
+            a = int(ts.taken_action)
+            if max_action is None or a > max_action:
+                max_action = a
+
+    if max_action is None:
+        raise ValueError("No actions found in episodes")
+
+    return max_action + 1
+
+
+@dataclass
+class BinningInfo:
+    rtg_min_int: int
+    rtg_max_int: int
+    num_rtg_bins: int
+    n_actions: int
+
+
 class EpisodeSliceDataset(Dataset):
     def __init__(
         self,
@@ -63,7 +86,8 @@ class EpisodeSliceDataset(Dataset):
         self.timestep_window_size: int = timestep_window_size
         self.image_size: Tuple[int, int] = image_size
 
-        # RTG binning: either use provided range or compute from episodes
+        # RTG binning: either use provided range or compute from these episodes
+        # (for central MGDT training we always pass the global range)
         if rtg_min_int is None or rtg_max_int is None:
             rtg_min_int, rtg_max_int = compute_rtg_bin_range(episodes)
 
@@ -147,8 +171,7 @@ def make_episode_dataloader(
     shuffle: bool = True,
     num_workers: int = 4,
     pin_memory: bool = True,
-) -> DataLoader:
-
+) -> Tuple[EpisodeSliceDataset, DataLoader]:
     dataset = EpisodeSliceDataset(
         episodes=episodes,
         timestep_window_size=context_len,
@@ -173,16 +196,23 @@ def make_train_val_dataloaders(
     batch_size: int = 32,
     num_workers: int = 4,
     pin_memory: bool = True,
-) -> tuple[DataLoader, DataLoader, EpisodeSliceDataset, EpisodeSliceDataset]:
+) -> tuple[
+    DataLoader,
+    DataLoader,
+    EpisodeSliceDataset,
+    EpisodeSliceDataset,
+    BinningInfo,
+]:
     episodes = list(episodes)
     n_total = len(episodes)
     if n_total == 0:
         raise ValueError("No episodes provided")
 
-    # global RTG range from all episodes
+    # Global ranges from the full episode list
     rtg_min_int, rtg_max_int = compute_rtg_bin_range(episodes)
+    n_actions = compute_n_actions(episodes)
 
-    # random episode-level split
+    # Random episode-level split
     indices = torch.randperm(n_total).tolist()
     n_train = int(train_frac * n_total)
     train_indices = indices[:n_train]
@@ -223,4 +253,11 @@ def make_train_val_dataloaders(
         pin_memory=pin_memory,
     )
 
-    return train_loader, val_loader, train_dataset, val_dataset
+    bins = BinningInfo(
+        rtg_min_int=rtg_min_int,
+        rtg_max_int=rtg_max_int,
+        num_rtg_bins=rtg_max_int - rtg_min_int + 1,
+        n_actions=n_actions,
+    )
+
+    return train_loader, val_loader, train_dataset, val_dataset, bins

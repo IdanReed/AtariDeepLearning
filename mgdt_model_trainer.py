@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from episode import Episode
-from episode_dataset import EpisodeSliceDataset
+from episode_dataset import EpisodeSliceDataset, BinningInfo
 from encoders import PatchEncoder, CNNEncoder
 from mgdt_model import MGDTModel
 
@@ -70,12 +70,11 @@ class Encoder(Enum):
 
 
 def train_mgdt(
-    episodes_train: List[Episode],
-    dataset_train: EpisodeSliceDataset,
+    bins: BinningInfo,
     dataloader_train: DataLoader,
     dataloader_val: Optional[DataLoader] = None,
     *,
-    encoder_type: Encoder = Encoder.CNN,
+    encoder_type: Encoder = Encoder.Patch,
     image_size: Tuple[int, int] = (84, 84),
     d_model: int = 512,
     n_layers: int = 6,
@@ -83,7 +82,6 @@ def train_mgdt(
     max_timestep_window_size: int = 32,
     lr: float = 3e-4,
     weight_decay: float = 0.01,
-    ema_alpha: float = 0.98,
     device: Optional[torch.device] = None,
 ) -> Tuple[MGDTModel, List[dict[str, Any]], List[dict[str, Any]]]:
     device = _ensure_device(device)
@@ -93,20 +91,16 @@ def train_mgdt(
         encoder = CNNEncoder(image_size=image_size, in_channels=3, d_model=d_model)
     elif encoder_type == Encoder.Patch:
         encoder = PatchEncoder(image_size=image_size, in_channels=3, d_model=d_model)
-    else:
-        raise ValueError(f"Unknown encoder_type: {encoder_type}")
 
-    # Action bins
-    n_actions = int(max(ts.taken_action for ep in episodes_train for ts in ep.timesteps) + 1)
-    
-    n_return_bins = dataset_train.num_rtg_bins
+    n_actions = bins.n_actions
+    n_return_bins = bins.num_rtg_bins
 
     model = MGDTModel(
         obs_encoder=encoder,
         n_actions=n_actions,
         n_return_bins=n_return_bins,
         n_reward_bins=3,
-        d_model=d_model,
+        emb_size=d_model,
         n_layers=n_layers,
         n_heads=n_heads,
         max_timestep_window_size=max_timestep_window_size,
@@ -115,7 +109,6 @@ def train_mgdt(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     train_stats: List[dict[str, Any]] = []
-    ema_loss: Optional[float] = None
 
     for step, batch in enumerate(tqdm(dataloader_train, desc="Training"), start=1):
         frames = batch["frames"].to(device)           # (B, T, C, H, W)
@@ -130,7 +123,7 @@ def train_mgdt(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
-        # gradient norm (after clipping)
+        # gradient norm
         total_grad_norm = 0.0
         for p in model.parameters():
             if p.grad is not None:
@@ -139,12 +132,6 @@ def train_mgdt(
         total_grad_norm = total_grad_norm ** 0.5
 
         optimizer.step()
-
-        # EMA of total loss
-        if ema_loss is None:
-            ema_loss = loss.item()
-        else:
-            ema_loss = ema_alpha * ema_loss + (1.0 - ema_alpha) * loss.item()
 
         # accuracies
         with torch.no_grad():
@@ -164,7 +151,6 @@ def train_mgdt(
                 "loss_return": float(stats["loss_return"]),
                 "loss_action": float(stats["loss_action"]),
                 "loss_reward": float(stats["loss_reward"]),
-                "ema_loss": float(ema_loss),
                 "grad_norm": float(total_grad_norm),
                 "return_acc": ret_acc,
                 "action_acc": act_acc,
@@ -172,7 +158,6 @@ def train_mgdt(
             }
         )
 
-    # optional validation pass
     val_stats: List[dict[str, Any]] = []
     if dataloader_val is not None:
         val_stats = evaluate_mgdt(model, dataloader_val, device)

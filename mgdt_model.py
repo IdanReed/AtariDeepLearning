@@ -10,24 +10,6 @@ from encoders import ObsEncoder
 
 
 class MGDTModel(nn.Module):
-    """
-    Multi-Game Decision Transformer-style model with a pluggable ObsEncoder.
-
-    For each timestep t in [0, T-1], we create tokens:
-      [ o_t^1, ..., o_t^M, R_t, a_t, r_t ]
-
-    Sequence over a window of T timesteps:
-      [ o_0^1 ... o_0^M R_0 a_0 r_0  o_1^1 ... R_1 a_1 r_1  ... ]
-
-    Autoregressive objective (Option A-style):
-      - Use hidden state at the last obs token of timestep t to predict R_t.
-      - Use hidden state at the R_t token to predict a_t.
-      - Use hidden state at the a_t token to predict r_t.
-
-    Because of the causal mask, none of these hidden states can see the
-    token they are predicting, only earlier tokens in the sequence.
-    """
-
     TYPE_OBS = 0
     TYPE_RETURN = 1
     TYPE_ACTION = 2
@@ -39,7 +21,7 @@ class MGDTModel(nn.Module):
         n_actions: int,
         n_return_bins: int,
         n_reward_bins: int = 3,
-        d_model: int = 512,
+        emb_size: int = 512,
         n_layers: int = 6,
         n_heads: int = 8,
         dim_feedforward: int = 2048,
@@ -50,33 +32,33 @@ class MGDTModel(nn.Module):
         super().__init__()
 
         self.obs_encoder = obs_encoder
-        self.d_model = d_model
+        self.d_model = emb_size
         self.n_actions = n_actions
         self.n_return_bins = n_return_bins
         self.n_reward_bins = n_reward_bins
         self.max_timestep_window_size = max_timestep_window_size
         self.loss_weights = loss_weights
 
-        self.L_obs = obs_encoder.num_tokens_per_frame
-        self.tokens_per_step = self.L_obs + 3  # obs + (return, action, reward)
-        self.max_seq_len = self.tokens_per_step * max_timestep_window_size
+        self.num_tokens_per_frame = obs_encoder.num_tokens_per_frame
+        self.tokens_per_timestep = self.num_tokens_per_frame + 3  # obs + (return, action, reward)
+        self.max_seq_len = self.tokens_per_timestep * max_timestep_window_size
 
         # token embeddings for scalar tokens
-        self.return_embed = nn.Embedding(n_return_bins, d_model)
-        self.action_embed = nn.Embedding(n_actions, d_model)
-        self.reward_embed = nn.Embedding(n_reward_bins, d_model)
+        self.return_embed = nn.Embedding(n_return_bins, emb_size)
+        self.action_embed = nn.Embedding(n_actions, emb_size)
+        self.reward_embed = nn.Embedding(n_reward_bins, emb_size)
 
         # positional + type embeddings
-        self.pos_embed = nn.Embedding(self.max_seq_len, d_model)
-        self.type_embed = nn.Embedding(4, d_model)  # obs/return/action/reward
+        self.pos_embed = nn.Embedding(self.max_seq_len, emb_size)
+        self.type_embed = nn.Embedding(4, emb_size)  # obs/return/action/reward
 
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
+            d_model=emb_size,
             nhead=n_heads,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             activation="gelu",
-            batch_first=True,  # (B, L, D)
+            batch_first=True,  # (batch_size, tokens_per_seq, emb_size)
             norm_first=True,
         )
         self.transformer = nn.TransformerEncoder(
@@ -85,15 +67,11 @@ class MGDTModel(nn.Module):
             enable_nested_tensor=False,
         )
 
-        # heads (still separate, but fed from previous-token states)
-        self.return_head = nn.Linear(d_model, n_return_bins)
-        self.action_head = nn.Linear(d_model, n_actions)
-        self.reward_head = nn.Linear(d_model, n_reward_bins)
+        self.return_head = nn.Linear(emb_size, n_return_bins)
+        self.action_head = nn.Linear(emb_size, n_actions)
+        self.reward_head = nn.Linear(emb_size, n_reward_bins)
 
-        # cache for attention masks keyed by timestep_window_size
         self._mask_cache: Dict[int, torch.Tensor] = {}
-
-    # ---- token layout helpers ----
 
     def _build_seq_tokens(
         self,
@@ -106,71 +84,71 @@ class MGDTModel(nn.Module):
         Build token embeddings (with pos/type added) of shape (B, L, D),
         where L = timesteps * (L_obs + 3).
         """
-        B, T, C, H, W = frames.shape
+        batch_size, n_timesteps, n_channels, img_height, img_width = frames.shape
 
-        # obs tokens from encoder: (B, T, L_obs, D)
-        obs_tokens = self.obs_encoder(frames)
+        # obs tokens from encoder
+        obs_tokens = self.obs_encoder(frames)                           # (B, n_timesteps, num_tokens_per_frame, D)
 
         # embed scalar tokens
-        R_emb = self.return_embed(rtg_bins)      # (B, T, D)
-        A_emb = self.action_embed(actions)       # (B, T, D)
-        r_emb = self.reward_embed(reward_bins)   # (B, T, D)
+        return_emb = self.return_embed(rtg_bins)                        # (B, n_timesteps, D)
+        action_emb = self.action_embed(actions)                         # (B, n_timesteps, D)
+        reward_emb = self.reward_embed(reward_bins)                     # (B, n_timesteps, D)
 
-        R_emb = R_emb.unsqueeze(2)  # (B, T, 1, D)
-        A_emb = A_emb.unsqueeze(2)  # (B, T, 1, D)
-        r_emb = r_emb.unsqueeze(2)  # (B, T, 1, D)
+        return_emb = return_emb.unsqueeze(2)                            # (B, n_timesteps, 1, D)
+        action_emb = action_emb.unsqueeze(2)                            # (B, n_timesteps, 1, D)
+        reward_emb = reward_emb.unsqueeze(2)                            # (B, n_timesteps, 1, D)
 
-        # concat per timestep: (B, T, L_obs+3, D)
-        step_tokens = torch.cat(
-            [obs_tokens, R_emb, A_emb, r_emb],
+        # concat per timestep
+        step_tokens = torch.cat(                                        # (B, n_timesteps, num_tokens_per_frame+3, D)
+            [obs_tokens, return_emb, action_emb, reward_emb],
             dim=2,
         )
-        B, T, S, D = step_tokens.shape  # S = tokens_per_step
+        batch_size, n_timesteps, tokens_per_timestep, emb_size = step_tokens.shape
 
-        # flatten over timesteps: (B, L, D)
-        seq_tokens = step_tokens.view(B, T * S, D)
+        # flatten
+        seq_tokens = step_tokens.view(batch_size, n_timesteps * tokens_per_timestep, emb_size)  # (B, seq_len, emb_size)     where seq_len = (n_timesteps * tokens_per_timestep)
 
         device = frames.device
-        L = T * S
+        L = n_timesteps * tokens_per_timestep
 
-        # type ids per position (shared across batch)
+        # positions
         pos = torch.arange(L, device=device)
-        step = pos // S
-        offset = pos % S
+        pos_ids = pos.unsqueeze(0).expand(batch_size, -1)        # (B, seq_len)
 
+        # types
+        offset = pos % tokens_per_timestep
         type_ids = torch.empty(L, dtype=torch.long, device=device)
-        type_ids[offset < self.L_obs] = self.TYPE_OBS
-        type_ids[offset == self.L_obs] = self.TYPE_RETURN
-        type_ids[offset == self.L_obs + 1] = self.TYPE_ACTION
-        type_ids[offset == self.L_obs + 2] = self.TYPE_REWARD
-
-        type_ids = type_ids.unsqueeze(0).expand(B, -1)  # (B, L)
-        pos_ids = pos.unsqueeze(0).expand(B, -1)        # (B, L)
-
+        type_ids[offset < self.num_tokens_per_frame] = self.TYPE_OBS
+        type_ids[offset == self.num_tokens_per_frame] = self.TYPE_RETURN
+        type_ids[offset == self.num_tokens_per_frame + 1] = self.TYPE_ACTION
+        type_ids[offset == self.num_tokens_per_frame + 2] = self.TYPE_REWARD
+        type_ids = type_ids.unsqueeze(0).expand(batch_size, -1)  # (B, seq_len)
+        
         seq_tokens = seq_tokens + self.pos_embed(pos_ids) + self.type_embed(type_ids)
         return seq_tokens
 
-    def _build_attention_mask(self, timestep_window_size: int, device: torch.device) -> torch.Tensor:
+    def _build_attention_mask(self, n_timesteps: int, device: torch.device) -> torch.Tensor:
         """
-        Build (L, L) attention mask with:
-          - Causal structure overall (no attending to future tokens).
-          - BUT patch tokens from the same timestep may attend each other
-            bidirectionally.
+        This is confusing as hell, but we've got multiple timesteps each with obs tokens and R/a/r tokens all in one sequence.
+
+        Generally a transformer attention mask is always causal, meaning that a token can only attend to previous tokens.
+        
+        However, obs tokens are not sequential so we need to allow them to attend to each other bidirectionally (that's what the paper does).
         """
-        if timestep_window_size in self._mask_cache:
-            return self._mask_cache[timestep_window_size].to(device)
+        if n_timesteps in self._mask_cache:
+            return self._mask_cache[n_timesteps].to(device)
 
-        S = self.tokens_per_step
-        L = timestep_window_size * S
+        tokens_per_timestep = self.tokens_per_timestep
+        seq_len = n_timesteps * tokens_per_timestep
 
-        pos = torch.arange(L, device=device)
-        step = pos // S          # timestep index per position
-        offset = pos % S         # position within timestep
-        is_obs = offset < self.L_obs
+        pos = torch.arange(seq_len, device=device)
+        step = pos // tokens_per_timestep          # timestep index per position
+        offset = pos % tokens_per_timestep         # position within timestep
+        is_obs = offset < self.num_tokens_per_frame
 
         # base: causal upper-triangular mask
         mask = torch.triu(
-            torch.full((L, L), float("-inf"), device=device),
+            torch.full((seq_len, seq_len), float("-inf"), device=device),
             diagonal=1,
         )
 
@@ -183,38 +161,30 @@ class MGDTModel(nn.Module):
         )
         mask = torch.where(obs_pair, torch.zeros_like(mask), mask)
 
-        # cache on CPU
-        self._mask_cache[timestep_window_size] = mask.detach().cpu()
+        # cache
+        self._mask_cache[n_timesteps] = mask.detach().cpu()
         return mask
 
     def _indices_per_type(
         self,
-        timestep_window_size: int,
+        n_timesteps: int,
         device: torch.device,
     ) -> Dict[str, torch.Tensor]:
-        """
-        Return boolean masks over sequence positions.
-
-        We separate:
-          - label positions for each type (where R_t, a_t, r_t live)
-          - source positions whose hidden states predict those labels
-            (previous tokens in the sequence).
-        """
-        S = self.tokens_per_step
-        L = timestep_window_size * S
-        pos = torch.arange(L, device=device)
-        offset = pos % S
+        tokens_per_timestep = self.tokens_per_timestep
+        seq_len = n_timesteps * tokens_per_timestep
+        pos = torch.arange(seq_len, device=device)
+        offset = pos % tokens_per_timestep
 
         # label positions
-        is_return = offset == self.L_obs
-        is_action = offset == self.L_obs + 1
-        is_reward = offset == self.L_obs + 2
+        is_return = offset == self.num_tokens_per_frame
+        is_action = offset == self.num_tokens_per_frame + 1
+        is_reward = offset == self.num_tokens_per_frame + 2
 
         # source positions (previous tokens):
         #   R_t  : last obs token at this timestep
         #   a_t  : R_t token
         #   r_t  : a_t token
-        src_for_return = offset == (self.L_obs - 1)
+        src_for_return = offset == (self.num_tokens_per_frame - 1)
         src_for_action = is_return
         src_for_reward = is_action
 
@@ -227,8 +197,6 @@ class MGDTModel(nn.Module):
             "src_for_reward": src_for_reward,
         }
 
-    # ---- forward + loss ----
-
     def forward(
         self,
         frames: torch.Tensor,      # (B, T, C, H, W)
@@ -236,28 +204,32 @@ class MGDTModel(nn.Module):
         actions: torch.Tensor,     # (B, T)
         reward_bins: torch.Tensor, # (B, T)
     ) -> Dict[str, torch.Tensor]:
-        """
-        Forward pass returning logits for return, action, and reward heads.
-
-        For each timestep t, the heads are fed from the *preceding* token
-        in the sequence (autoregressive next-token prediction).
-        """
-        B, T, C, H, W = frames.shape
+        # Get tokens
+        batch_size, n_timesteps, n_channels, img_height, img_width = frames.shape
         seq_tokens = self._build_seq_tokens(frames, rtg_bins, actions, reward_bins)
         device = frames.device
 
-        attn_mask = self._build_attention_mask(T, device=device)  # (L, L)
-        h = self.transformer(seq_tokens, mask=attn_mask)          # (B, L, D)
+        # Attention mask
+        attn_mask = self._build_attention_mask(n_timesteps, device=device)  # (L, L)
 
-        idx = self._indices_per_type(T, device=device)
+        # TRANSFORMER
+        hidden_states = self.transformer(seq_tokens, mask=attn_mask)          # (B, seq_len, emb_size)
+
+        # These dimensions are messing with me, but we've got a big block of hidden state
+        # Same dimensions as transformer input but now everything is attented to each other
+
+        # This gives us the TOKEN INDEX for the token preceding what we're predicting
+        # For each time step, within each batch
+        idx = self._indices_per_type(n_timesteps, device=device)
         src_ret = idx["src_for_return"]
         src_act = idx["src_for_action"]
         src_rew = idx["src_for_reward"]
 
-        # pick source positions for each type: (B, T, D)
-        return_h = h[:, src_ret, :]
-        action_h = h[:, src_act, :]
-        reward_h = h[:, src_rew, :]
+        # For each timestep within each batch pull out a vector that is emb_size 
+        # e.g. (batch_size, n_timesteps, emb_size)
+        return_h = hidden_states[:, src_ret, :]
+        action_h = hidden_states[:, src_act, :]
+        reward_h = hidden_states[:, src_rew, :]
 
         return_logits = self.return_head(return_h)   # (B, T, n_return_bins)
         action_logits = self.action_head(action_h)   # (B, T, n_actions)
@@ -276,17 +248,6 @@ class MGDTModel(nn.Module):
         actions: torch.Tensor,
         reward_bins: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """
-        Compute total loss and per-head losses.
-
-        Targets are:
-          - rtg_bins:      (B, T) in [0, n_return_bins)
-          - actions:       (B, T) in [0, n_actions)
-          - reward_bins:   (B, T) in [0, n_reward_bins)
-
-        Each target is predicted from the previous token in the sequence
-        (last obs for R_t, R_t for a_t, a_t for r_t).
-        """
         out = self.forward(frames, rtg_bins, actions, reward_bins)
         B, T = actions.shape
 
