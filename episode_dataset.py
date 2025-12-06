@@ -19,6 +19,7 @@ def load_frame(
     img = img.convert("RGB")
 
     if resize_to is not None:
+        # Idk if we need this but might as well force images to be the same size in case some are weird
         img = img.resize(resize_to, resample=Image.BILINEAR)
 
     arr = np.array(img, dtype=np.float32) / 255.0
@@ -36,7 +37,6 @@ def reward_to_bin(reward: float) -> int:
 
 
 def compute_rtg_bin_range(episodes: List[Episode]) -> Tuple[int, int]:
-    """Compute global integer RTG min/max across a list of episodes."""
     rtg_values: List[float] = []
     for episode in episodes:
         for ts in episode.timesteps:
@@ -44,7 +44,7 @@ def compute_rtg_bin_range(episodes: List[Episode]) -> Tuple[int, int]:
                 rtg_values.append(float(ts.rtg))
 
     if not rtg_values:
-        return 0, 0
+        raise ValueError("No RTG values found")
 
     rtg_ints = [int(round(v)) for v in rtg_values]
     return min(rtg_ints), max(rtg_ints)

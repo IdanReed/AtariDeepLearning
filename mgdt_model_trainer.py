@@ -96,8 +96,9 @@ def train_mgdt(
     else:
         raise ValueError(f"Unknown encoder_type: {encoder_type}")
 
-    # Bins
+    # Action bins
     n_actions = int(max(ts.taken_action for ep in episodes_train for ts in ep.timesteps) + 1)
+    
     n_return_bins = dataset_train.num_rtg_bins
 
     model = MGDTModel(
