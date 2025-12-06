@@ -24,7 +24,7 @@ def discover_game_npz_paths(paths: list[Path]) -> Dict[str, Any]:
     return game_npz_paths
 
 def get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
-    # Game -> dicts each represents one sequence
+    # Game -> dicts each represents one gameplay sequence
     # actually we should be splitting this by episode
     game_to_sequences: Dict[Path, List[dict]] = {}
 
@@ -84,3 +84,56 @@ def fix_obs_paths(
         fixed[game_path] = fixed_seqs
 
     return fixed
+
+from episode import Episode, TimeStep
+
+def build_episodes_from_sequences(
+    sequences_by_game: Dict[Path, List[dict]],
+) -> List[Episode]:
+    episodes: List[Episode] = []
+
+    for game_path, seq_list in sequences_by_game.items():
+        game_name = Path(game_path).name  # e.g. "BeamRiderNoFrameskip-v4"
+
+        for seq_dict in seq_list:
+            episode_starts = np.asarray(seq_dict["episode_starts"], dtype=bool)
+            
+            timestep_count = episode_starts.shape[0]
+            
+            num_episode_starts = np.sum(episode_starts)
+
+            # indices where a new episode begins within this gameplay sequence
+            start_indices = np.where(episode_starts)[0]
+
+            # If there are no episode_starts, we skip this sequence
+            if start_indices.size == 0:
+                continue
+
+            for i, start in enumerate(start_indices):
+                end = start_indices[i + 1] if i + 1 < start_indices.size else timestep_count
+
+                timesteps: List[TimeStep] = []
+                for t in range(start, end):
+                    obs_str = seq_dict["obs"][t]
+                    obs_path = Path(str(obs_str))
+
+                    # arrays are shaped (T, 1) for actions
+                    model_selected_action = seq_dict["model selected actions"][t][0]
+                    action_taken = seq_dict["taken actions"][t][0]
+
+                    repeated = bool(seq_dict["repeated"][t])
+                    reward = float(seq_dict["rewards"][t])
+
+                    ts = TimeStep(
+                        obs=obs_path,
+                        model_selected_action=model_selected_action,
+                        action_taken=action_taken,
+                        repeated=repeated,
+                        reward=reward,
+                    )
+                    timesteps.append(ts)
+
+                if timesteps:
+                    episodes.append(Episode(game_name=game_name, timesteps=timesteps))
+
+    return episodes
