@@ -47,7 +47,7 @@ def inspect_dataloader(
         n_batches_used += 1
 
         frames = batch["frames"]           # (B, T, C, H, W)
-        actions = batch["actions"]
+        actions = batch["model_selected_actions"]
         rewards = batch["rewards"]
         rtg = batch["rtg"]
         reward_bins = batch["reward_bins"]

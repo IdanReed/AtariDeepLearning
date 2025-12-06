@@ -119,7 +119,7 @@ class EpisodeSliceDataset(Dataset):
         window_steps: List[TimeStep] = episode.timesteps[start_t:end_t]
 
         frames = []
-        actions = []
+        taken_actions = []
         rewards = []
         rtg = []
         model_selected_actions = []
@@ -129,7 +129,7 @@ class EpisodeSliceDataset(Dataset):
 
         for ts in window_steps:
             frames.append(load_frame(ts.obs, resize_to=self.image_size))
-            actions.append(int(ts.taken_action))
+            taken_actions.append(int(ts.taken_action))
             rewards.append(float(ts.reward))
             rtg.append(float(ts.rtg))
 
@@ -140,7 +140,7 @@ class EpisodeSliceDataset(Dataset):
             repeated_actions.append(bool(ts.repeated_action))
 
         frames_tensor = torch.stack(frames, dim=0)
-        actions_tensor = torch.tensor(actions, dtype=torch.long)
+        taken_actions_tensor = torch.tensor(taken_actions, dtype=torch.long)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
         rtg_tensor = torch.tensor(rtg, dtype=torch.float32)
         reward_bins_tensor = torch.tensor(reward_bins, dtype=torch.long)
@@ -150,7 +150,7 @@ class EpisodeSliceDataset(Dataset):
 
         return {
             "frames": frames_tensor,
-            "actions": actions_tensor,
+            "taken_actions": taken_actions_tensor,
             "rewards": rewards_tensor,
             "rtg": rtg_tensor,
             "reward_bins": reward_bins_tensor,

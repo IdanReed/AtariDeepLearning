@@ -32,7 +32,7 @@ def evaluate_mgdt(
     with torch.no_grad():
         for step, batch in enumerate(tqdm(dataloader, desc="Validation"), start=1):
             frames = batch["frames"].to(device)
-            actions = batch["actions"].to(device)
+            actions = batch["model_selected_actions"].to(device)
             rtg_bins = batch["rtg_bins"].to(device)
             reward_bins = batch["reward_bins"].to(device)
 
@@ -110,7 +110,9 @@ def train_mgdt(
 
     for step, batch in enumerate(tqdm(dataloader_train, desc="Training"), start=1):
         frames = batch["frames"].to(device)           # (B, T, C, H, W)
-        actions = batch["actions"].to(device)         # (B, T)
+        # I think predicting model selected action is more important than taken action
+        # otherwise there just noise forced on top of the policy/behavior that our model is attempting to replicated
+        actions = batch["model_selected_actions"].to(device)         # (B, T)
         rtg_bins = batch["rtg_bins"].to(device)       # (B, T)
         reward_bins = batch["reward_bins"].to(device) # (B, T)
 
