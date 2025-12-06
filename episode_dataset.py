@@ -63,7 +63,7 @@ class EpisodeSliceDataset(Dataset):
         self.timestep_window_size: int = timestep_window_size
         self.image_size: Tuple[int, int] = image_size
 
-        # ---- RTG binning: either use provided range or compute from episodes ----
+        # RTG binning: either use provided range or compute from episodes
         if rtg_min_int is None or rtg_max_int is None:
             rtg_min_int, rtg_max_int = compute_rtg_bin_range(episodes)
 
@@ -137,7 +137,6 @@ class EpisodeSliceDataset(Dataset):
             "episode_index": episode_index,
             "start_t": start_t,
         }
-
 
 
 def make_episode_dataloader(

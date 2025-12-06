@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, List, Tuple, Optional
-import math
 
 import torch
 from torch.utils.data import DataLoader
@@ -69,6 +68,7 @@ class Encoder(Enum):
     Patch = "patch"
     CNN = "cnn"
 
+
 def train_mgdt(
     episodes_train: List[Episode],
     dataset_train: EpisodeSliceDataset,
@@ -93,8 +93,10 @@ def train_mgdt(
         encoder = CNNEncoder(image_size=image_size, in_channels=3, d_model=d_model)
     elif encoder_type == Encoder.Patch:
         encoder = PatchEncoder(image_size=image_size, in_channels=3, d_model=d_model)
+    else:
+        raise ValueError(f"Unknown encoder_type: {encoder_type}")
 
-    # Bin
+    # Bins
     n_actions = int(max(ts.taken_action for ep in episodes_train for ts in ep.timesteps) + 1)
     n_return_bins = dataset_train.num_rtg_bins
 
@@ -165,11 +167,11 @@ def train_mgdt(
                 "grad_norm": float(total_grad_norm),
                 "return_acc": ret_acc,
                 "action_acc": act_acc,
-                "reward_acc": rew_acc
+                "reward_acc": rew_acc,
             }
         )
 
-    # ----- optional validation pass -----
+    # optional validation pass
     val_stats: List[dict[str, Any]] = []
     if dataloader_val is not None:
         val_stats = evaluate_mgdt(model, dataloader_val, device)
