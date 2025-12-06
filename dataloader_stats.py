@@ -162,9 +162,6 @@ def inspect_dataloader(
         ax.set_ylabel("Timesteps")
     else:
         ax.set_visible(False)
-
-    # fig.tight_layout(rect=[0, 0.03, 1, 0.95])
-
     stats = {
         "first_shapes": first_shapes,
         "n_batches_used": n_batches_used,
