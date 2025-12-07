@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, Enum
+from typing import Dict, List, Tuple
+from enum import Enum
 
 import torch
 import torch.nn as nn
@@ -294,15 +295,21 @@ class MGDTModel(nn.Module):
         return out, total, stats
 
     def freeze(self, components: List[Freezeable]) -> None:
+        components_frozen = 0
         for component in components:
             module = getattr(self, component.value)
             module.eval()
             for param in module.parameters():
                 param.requires_grad = False
+            components_frozen += 1
+        return components_frozen
 
     def unfreeze(self, components: List[Freezeable]) -> None:
+        components_unfrozen = 0
         for component in components:
             module = getattr(self, component.value)
             module.train()
             for param in module.parameters():
                 param.requires_grad = True
+            components_unfrozen += 1
+        return components_unfrozen
