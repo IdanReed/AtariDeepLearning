@@ -74,7 +74,7 @@ def train_mgdt(
     *,
     encoder_type: Encoder = Encoder.Patch,
     image_size: Tuple[int, int] = (84, 84),
-    d_model: int = 512,
+    emb_size: int = 512,
     n_layers: int = 6,
     n_heads: int = 8,
     max_timestep_window_size: int = 32,
@@ -86,9 +86,9 @@ def train_mgdt(
 
     # Encoder
     if encoder_type == Encoder.CNN:
-        encoder = CNNEncoder(image_size=image_size, in_channels=3, d_model=d_model)
+        encoder = CNNEncoder(image_size=image_size, in_channels=3, emb_size=emb_size)
     elif encoder_type == Encoder.Patch:
-        encoder = PatchEncoder(image_size=image_size, in_channels=3, d_model=d_model)
+        encoder = PatchEncoder(image_size=image_size, in_channels=3, emb_size=emb_size)
 
     n_actions = bins.n_actions
     n_return_bins = bins.num_rtg_bins
@@ -98,7 +98,7 @@ def train_mgdt(
         n_actions=n_actions,
         n_return_bins=n_return_bins,
         n_reward_bins=3,
-        emb_size=d_model,
+        emb_size=emb_size,
         n_layers=n_layers,
         n_heads=n_heads,
         max_timestep_window_size=max_timestep_window_size,

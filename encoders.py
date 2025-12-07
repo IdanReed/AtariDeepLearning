@@ -9,16 +9,12 @@ import torch.nn.functional as F
 
 class ObsEncoder(nn.Module):
     """
-    Base class for observation encoders.
-
-    Expected interface:
-      - forward(frames): (B, T, C, H, W) -> (B, T, L_obs, d_model)
-      - num_tokens_per_frame: number of tokens L_obs per image frame.
+    Base class for obs encoders, defines forward and num_tokens_per_frame 
     """
 
-    def __init__(self, d_model: int):
+    def __init__(self, emb_size: int):
         super().__init__()
-        self.d_model = d_model
+        self.emb_size = emb_size
         self._num_tokens_per_frame: Optional[int] = None
 
     @property
@@ -36,29 +32,21 @@ class ObsEncoder(nn.Module):
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
         """
-        frames: (B, T, C, H, W)
-        returns: (B, T, L_obs, d_model)
+        frames: (batch_size, n_timesteps, n_channels, img_height, img_width)
+        returns: (batch_size, n_timesteps, n_tokens_per_frame, emb_size)
         """
         raise NotImplementedError
 
 
 class PatchEncoder(ObsEncoder):
-    """
-    Simple patch encoder: Conv2d with kernel_size = stride = patch_size
-    to generate non-overlapping patches, then flatten.
-
-    For example, with image_size=(84,84) and patch_size=14:
-      H' = 84/14 = 6, W' = 6 -> L_obs = 36 tokens/frame.
-    """
-
     def __init__(
         self,
         image_size: Tuple[int, int],
         in_channels: int = 3,
-        d_model: int = 512,
+        emb_size: int = 512,
         patch_size: int = 14,
     ):
-        super().__init__(d_model=d_model)
+        super().__init__(emb_size=emb_size)
 
         self.image_size = image_size
         self.in_channels = in_channels
@@ -66,46 +54,38 @@ class PatchEncoder(ObsEncoder):
 
         self.proj = nn.Conv2d(
             in_channels,
-            d_model,
+            emb_size,
             kernel_size=patch_size,
             stride=patch_size,
         )
 
-        H, W = image_size
-        H_p = H // patch_size
-        W_p = W // patch_size
-        self.num_tokens_per_frame = H_p * W_p
+        img_height, img_width = image_size
+        patches_height = img_height // patch_size
+        patches_width = img_width // patch_size
+        self.num_tokens_per_frame = patches_height * patches_width
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
         """
-        frames: (B, T, C, H, W)
-        returns: (B, T, L_obs, d_model)
+        frames: (batch_size, n_timesteps, n_channels, img_height, img_width)
+        returns: (batch_size, n_timesteps, n_tokens_per_frame, emb_size)
         """
-        B, T, C, H, W = frames.shape
-        x = frames.view(B * T, C, H, W)          # (B*T, C, H, W)
-        x = self.proj(x)                         # (B*T, d_model, H', W')
-        x = x.flatten(2).transpose(1, 2)         # (B*T, L_obs, d_model)
-        L_obs = x.shape[1]
-        x = x.view(B, T, L_obs, self.d_model)    # (B, T, L_obs, d_model)
-        return x
+        batch_size, n_timesteps, n_channels, img_height, img_width = frames.shape
+        processed_frames = frames.view(batch_size * n_timesteps, n_channels, img_height, img_width)     # (batch_size * n_timesteps, n_channels, img_height, img_width)
+        patch_features = self.proj(processed_frames)                                                    # (batch_size * n_timesteps, emb_size, patches_height, patches_width)
+        obs_tokens = patch_features.flatten(2).transpose(1, 2)                                          # (batch_size * n_timesteps, num_obs_tokens, emb_size)
+        num_obs_tokens = obs_tokens.shape[1]
+        obs_tokens = obs_tokens.view(batch_size, n_timesteps, num_obs_tokens, self.emb_size)            # (batch_size, n_timesteps, num_obs_tokens, emb_size)
+        return obs_tokens
 
 
 class CNNEncoder(ObsEncoder):
-    """
-    Atari-style CNN encoder:
-      - 3 conv layers
-      - Each spatial cell becomes a token, then projected to d_model.
-
-    We infer num_tokens_per_frame using a dummy pass with the given image_size.
-    """
-
-    def __init__(
+    def __init__(   
         self,
         image_size: Tuple[int, int],
         in_channels: int = 3,
-        d_model: int = 512,
+        emb_size: int = 512,
     ):
-        super().__init__(d_model=d_model)
+        super().__init__(emb_size=emb_size)
 
         self.image_size = image_size
         self.in_channels = in_channels
@@ -119,28 +99,39 @@ class CNNEncoder(ObsEncoder):
             nn.ReLU(inplace=True),
         )
 
-        self.proj = nn.Linear(64, d_model)  # applied per spatial location
+        self.proj = nn.Linear(64, emb_size) 
 
-        # infer num_tokens_per_frame with a dummy forward
-        H, W = image_size
+        # Just run forward to figure out num_tokens_per_frame
+        img_height, img_width = image_size
         with torch.no_grad():
-            dummy = torch.zeros(1, in_channels, H, W)  # (1, C, H, W)
-            feats = self.conv(dummy)                   # (1, 64, H', W')
+            dummy = torch.zeros(1, in_channels, img_height, img_width)
+            feats = self.conv(dummy)
             _, _, Hp, Wp = feats.shape
             self.num_tokens_per_frame = Hp * Wp
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
         """
-        frames: (B, T, C, H, W)
-        returns: (B, T, L_obs, d_model)
+        frames: (batch_size, n_timesteps, n_channels, img_height, img_width)
+        returns: (batch_size, n_timesteps, n_tokens_per_frame, emb_size)
         """
-        B, T, C, H, W = frames.shape
-        x = frames.view(B * T, C, H, W)         # (B*T, C, H, W)
-        x = self.conv(x)                        # (B*T, 64, H', W')
-        x = x.permute(0, 2, 3, 1)               # (B*T, H', W', 64)
-        B_T, Hp, Wp, C_out = x.shape
-        x = x.reshape(B_T, Hp * Wp, C_out)      # (B*T, L_obs, 64)
-        x = self.proj(x)                        # (B*T, L_obs, d_model)
-        L_obs = x.shape[1]
-        x = x.view(B, T, L_obs, self.d_model)   # (B, T, L_obs, d_model)
-        return x
+        batch_size, n_timesteps, n_channels, img_height, img_width = frames.shape
+        processed_frames = frames.view(batch_size * n_timesteps, n_channels, img_height, img_width)     # (batch_size * n_timesteps, n_channels, img_height, img_width)
+        
+        # Conv layers
+        conv_features = self.conv(processed_frames)                                                     # (batch_size * n_timesteps, 64, feat_height, feat_width)
+        spatial_features = conv_features.permute(0, 2, 3, 1)                                            # (batch_size * n_timesteps, feat_height, feat_width, 64)
+        
+        # Flatten
+        flat_batch_size, feat_height, feat_width, out_channels = spatial_features.shape
+        flattened_features = spatial_features.reshape(
+            flat_batch_size, feat_height * feat_width, out_channels
+        )                                                                                                   # (batch_size * n_timesteps, num_obs_tokens, 64)
+        
+        # Linear projection to emb_size
+        obs_tokens = self.proj(flattened_features)                                                      # (batch_size * n_timesteps, num_obs_tokens, emb_size)
+
+        # Add back in timestep dim
+        num_obs_tokens = obs_tokens.shape[1]
+        obs_tokens = obs_tokens.view(batch_size, n_timesteps, num_obs_tokens, self.emb_size)            # (batch_size, n_timesteps, num_obs_tokens, emb_size)
+
+        return obs_tokens
