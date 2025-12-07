@@ -20,7 +20,7 @@ def load_frame(
     img = img.convert("RGB")
 
     if resize_to is not None:
-        # Force images to the same size
+        # Not sure if this is needed but for sanity we'll force all images to the same size
         img = img.resize(resize_to, resample=Image.BILINEAR)
 
     arr = np.array(img, dtype=np.float32) / 255.0
@@ -86,8 +86,6 @@ class EpisodeSliceDataset(Dataset):
         self.timestep_window_size: int = timestep_window_size
         self.image_size: Tuple[int, int] = image_size
 
-        # RTG binning: either use provided range or compute from these episodes
-        # (for central MGDT training we always pass the global range)
         if rtg_min_int is None or rtg_max_int is None:
             rtg_min_int, rtg_max_int = compute_rtg_bin_range(episodes)
 
@@ -95,7 +93,7 @@ class EpisodeSliceDataset(Dataset):
         self.rtg_max_int: int = int(rtg_max_int)
         self.num_rtg_bins: int = self.rtg_max_int - self.rtg_min_int + 1
 
-        # Precompute (episode_index, start_t) for every valid window
+        # Precompute slices
         self._slice_indexes: List[Tuple[int, int]] = []
         for episode_index, episode in enumerate(self.episodes):
             timesteps_len = len(episode.timesteps)
@@ -211,30 +209,11 @@ def make_train_val_dataloaders(
     Optional[DataLoaderBundle],
     BinningInfo,
 ]:
-    """
-    Create train/val dataloaders, optionally splitting out holdout games.
-    
-    Args:
-        episodes: List of all episodes
-        holdout_games: Optional list of game names to hold out for adaptation testing.
-                      If None, no holdout split is performed.
-        train_frac: Fraction of episodes to use for training (rest for validation)
-        timestep_window_size: Number of timesteps per training sample
-        image_size: Size to resize frames to
-        batch_size: Batch size for dataloaders
-        num_workers: Number of worker processes for data loading
-        pin_memory: Whether to pin memory for faster GPU transfer
-    
-    Returns:
-        main_bundle: DataLoaderBundle for main (non-holdout) games
-        holdout_bundle: DataLoaderBundle for holdout games (None if holdout_games is None)
-        bins: BinningInfo computed from ALL episodes (for consistent binning)
-    """
     episodes = list(episodes)
     if len(episodes) == 0:
         raise ValueError("No episodes provided")
 
-    # Compute global ranges from ALL episodes for consistent binning
+    # Calc bins from all episodes (other wise bins with be wrong for new data)
     rtg_min_int, rtg_max_int = compute_rtg_bin_range(episodes)
     n_actions = compute_n_actions(episodes)
 
@@ -245,76 +224,105 @@ def make_train_val_dataloaders(
         n_actions=n_actions,
     )
 
-    # Split episodes by game name if holdout_games is specified
+    # Split holdout game episodes out
     if holdout_games is not None:
         holdout_set = set(holdout_games)
         main_episodes = [ep for ep in episodes if ep.game_name not in holdout_set]
         holdout_episodes = [ep for ep in episodes if ep.game_name in holdout_set]
         
         if len(main_episodes) == 0:
-            raise ValueError("No episodes remaining after holdout split - all games are in holdout_games")
+            raise ValueError("No main episodes")
         if len(holdout_episodes) == 0:
-            raise ValueError(f"No holdout episodes found - none of {holdout_games} matched episode game names")
+            raise ValueError(f"No holdout episodes")
     else:
         main_episodes = episodes
         holdout_episodes = []
 
-    # Helper to create train/val split for a set of episodes
-    def _create_bundle(eps: List[Episode]) -> DataLoaderBundle:
-        n_total = len(eps)
-        indices = torch.randperm(n_total).tolist()
-        n_train = int(train_frac * n_total)
-        train_indices = indices[:n_train]
-        val_indices = indices[n_train:]
-
-        train_eps = [eps[i] for i in train_indices]
-        val_eps = [eps[i] for i in val_indices]
-
-        train_dataset = EpisodeSliceDataset(
-            train_eps,
-            timestep_window_size=timestep_window_size,
-            image_size=image_size,
-            rtg_min_int=rtg_min_int,
-            rtg_max_int=rtg_max_int,
-        )
-
-        val_dataset = EpisodeSliceDataset(
-            val_eps,
-            timestep_window_size=timestep_window_size,
-            image_size=image_size,
-            rtg_min_int=rtg_min_int,
-            rtg_max_int=rtg_max_int,
-        )
-
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-        )
-
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-        )
-
-        return DataLoaderBundle(
-            train_loader=train_loader,
-            val_loader=val_loader,
-            train_dataset=train_dataset,
-            val_dataset=val_dataset,
-        )
-
     # Create main bundle
-    main_bundle = _create_bundle(main_episodes)
+    main_bundle = _create_bundle(
+        main_episodes,
+        train_frac=train_frac,
+        timestep_window_size=timestep_window_size,
+        image_size=image_size,
+        rtg_min_int=rtg_min_int,
+        rtg_max_int=rtg_max_int,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
 
     # Create holdout bundle if applicable
     holdout_bundle: Optional[DataLoaderBundle] = None
     if holdout_games is not None and len(holdout_episodes) > 0:
-        holdout_bundle = _create_bundle(holdout_episodes)
+        holdout_bundle = _create_bundle(
+            holdout_episodes,
+            train_frac=train_frac,
+            timestep_window_size=timestep_window_size,
+            image_size=image_size,
+            rtg_min_int=rtg_min_int,
+            rtg_max_int=rtg_max_int,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
 
     return main_bundle, holdout_bundle, bins
+
+def _create_bundle(
+    eps: List[Episode],
+    train_frac: float,
+    timestep_window_size: int,
+    image_size: Tuple[int, int],
+    rtg_min_int: int,
+    rtg_max_int: int,
+    batch_size: int,
+    num_workers: int,
+    pin_memory: bool,
+) -> DataLoaderBundle:
+    n_total = len(eps)
+    indices = torch.randperm(n_total).tolist()
+    n_train = int(train_frac * n_total)
+    train_indices = indices[:n_train]
+    val_indices = indices[n_train:]
+
+    train_eps = [eps[i] for i in train_indices]
+    val_eps = [eps[i] for i in val_indices]
+
+    train_dataset = EpisodeSliceDataset(
+        train_eps,
+        timestep_window_size=timestep_window_size,
+        image_size=image_size,
+        rtg_min_int=rtg_min_int,
+        rtg_max_int=rtg_max_int,
+    )
+
+    val_dataset = EpisodeSliceDataset(
+        val_eps,
+        timestep_window_size=timestep_window_size,
+        image_size=image_size,
+        rtg_min_int=rtg_min_int,
+        rtg_max_int=rtg_max_int,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+
+    return DataLoaderBundle(
+        train_loader=train_loader,
+        val_loader=val_loader,
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+    )

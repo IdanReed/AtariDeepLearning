@@ -1,35 +1,26 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Match style from mgdt_model_stats
+sns.set_style("whitegrid")
+sns.set_palette("husl")
 
 
 def inspect_dataloader(
     dataloader,
     title: str,
     max_batches: int = 50,
+    output_dir: Optional[Path] = None,
+    max_bars_for_labels: int = 20,
 ) -> dict[str, Any]:
-    """
-    Iterate over up to `max_batches` from a dataloader built on EpisodeSliceDataset
-    and produce basic sanity-check plots + stats.
-
-    Expects each batch to be a dict with keys:
-      - frames: (B, T, C, H, W)
-      - actions: (B, T)
-      - rewards: (B, T)
-      - rtg: (B, T)
-      - reward_bins: (B, T)
-      - rtg_bins: (B, T)
-      - game_name: list[str]
-      - repeated_actions, model_selected_actions, ...
-
-    Returns a dict of aggregated stats in case you want to inspect numerically.
-    """
-
     all_actions = []
     all_rewards = []
     all_rtg = []
@@ -46,13 +37,13 @@ def inspect_dataloader(
 
         n_batches_used += 1
 
-        frames = batch["frames"]           # (B, T, C, H, W)
+        frames = batch["frames"]
         actions = batch["model_selected_actions"]
         rewards = batch["rewards"]
         rtg = batch["rtg"]
         reward_bins = batch["reward_bins"]
         rtg_bins = batch["rtg_bins"]
-        game_names = batch["game_name"]    # list[str]
+        game_names = batch["game_name"]
 
         if first_shapes is None:
             first_shapes = {
@@ -62,7 +53,6 @@ def inspect_dataloader(
                 "rtg": tuple(rtg.shape),
             }
 
-        # flatten (B, T) -> (-1,)
         all_actions.append(actions.reshape(-1).cpu())
         all_rewards.append(rewards.reshape(-1).cpu())
         all_rtg.append(rtg.reshape(-1).cpu())
@@ -87,7 +77,6 @@ def inspect_dataloader(
 
     game_counts = Counter(all_game_names)
 
-    # ---- basic prints ----
     print(f"=== Dataloader Sanity Check: {title} ===")
     print(f"Used batches: {n_batches_used}")
     print(f"First batch shapes: {first_shapes}")
@@ -104,64 +93,91 @@ def inspect_dataloader(
     print(f"NaNs in rewards? {np.isnan(rewards_np).any()}")
     print(f"NaNs in RTG? {np.isnan(rtg_np).any()}")
 
-    # ---- plots ----
+    colors = sns.color_palette("husl", 6)
+    
     fig, axes = plt.subplots(2, 3, figsize=(15, 12))
-    fig.suptitle(f"Dataloader Sanity Plots: {title}")
+    fig.suptitle(f"Dataloader Sanity Plots: {title}", fontsize=16)
 
-    # 1. Action frequency
+    # Action frequency
     ax = axes[0, 0]
     unique_actions, counts_actions = np.unique(actions_np, return_counts=True)
-    bars = ax.bar(unique_actions, counts_actions)
-    ax.bar_label(bars, fmt='%d')
+    bars = ax.bar(unique_actions, counts_actions, color=colors[0])
+    if len(unique_actions) <= max_bars_for_labels:
+        ax.bar_label(bars, fmt='%d')
     ax.set_title("Action Frequencies")
     ax.set_xlabel("Action ID")
     ax.set_ylabel("Count")
+    ax.grid(True, alpha=0.3)
 
-    # 2. Reward distribution
+    # Reward distribution
     ax = axes[0, 1]
-    ax.hist(rewards_np, bins=50)
+    reward_unique, reward_counts = np.unique(rewards_np, return_counts=True)
+    bars = ax.bar(reward_unique, reward_counts, color=colors[1], width=0.1)
+    if len(reward_unique) <= max_bars_for_labels:
+        ax.bar_label(bars, fmt='%d')
     ax.set_title("Reward Distribution")
     ax.set_xlabel("Reward")
     ax.set_ylabel("Count")
+    ax.grid(True, alpha=0.3)
 
-    # 3. RTG distribution
+    # RTG distribution
     ax = axes[0, 2]
-    ax.hist(rtg_np, bins=50)
+    ax.hist(rtg_np, bins=50, color=colors[2], edgecolor='white', alpha=0.8)
     ax.set_title("RTG Distribution")
     ax.set_xlabel("RTG")
     ax.set_ylabel("Count")
+    ax.grid(True, alpha=0.3)
 
-    # 4. Reward bin counts
+    # Reward bin counts
     ax = axes[1, 0]
     rb_unique, rb_counts = np.unique(reward_bins_np, return_counts=True)
-    bars = ax.bar(rb_unique, rb_counts)
-    ax.bar_label(bars, fmt='%d')
+    bars = ax.bar(rb_unique, rb_counts, color=colors[3])
+    if len(rb_unique) <= max_bars_for_labels:
+        ax.bar_label(bars, fmt='%d')
     ax.set_title("Reward Bin Counts")
     ax.set_xlabel("Reward bin (0=-1,1=0,2=+1)")
     ax.set_ylabel("Count")
+    ax.grid(True, alpha=0.3)
 
-    # 5. RTG bin counts
+    # RTG bin counts
     ax = axes[1, 1]
     rtb_unique, rtb_counts = np.unique(rtg_bins_np, return_counts=True)
-    bars = ax.bar(rtb_unique, rtb_counts)
-    ax.bar_label(bars, fmt='%d')
+    bars = ax.bar(rtb_unique, rtb_counts, color=colors[4])
+    if len(rtb_unique) <= max_bars_for_labels:
+        ax.bar_label(bars, fmt='%d')
     ax.set_title("RTG Bin Counts")
     ax.set_xlabel("RTG bin index")
     ax.set_ylabel("Count")
+    ax.grid(True, alpha=0.3)
 
-    # 6. Samples per game
+    # Samples per game
     ax = axes[1, 2]
     if game_counts:
         games = list(game_counts.keys())
         counts = [game_counts[g] for g in games]
-        bars = ax.bar(range(len(games)), counts)
-        ax.bar_label(bars, fmt='%d')
+        bars = ax.bar(range(len(games)), counts, color=colors[5])
+        if len(games) <= max_bars_for_labels:
+            ax.bar_label(bars, fmt='%d')
         ax.set_xticks(range(len(games)))
         ax.set_xticklabels(games, rotation=45, ha="right")
         ax.set_title("Timesteps per Game (subset)")
         ax.set_ylabel("Timesteps")
+        ax.grid(True, alpha=0.3)
     else:
         ax.set_visible(False)
+    plt.tight_layout()
+
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = title.replace(" ", "_").replace("/", "_")
+        fig.savefig(output_dir / f"{safe_title}.png", dpi=150)
+        print(f"Saved plot to {output_dir / f'{safe_title}.png'}")
+    else:
+        plt.show()
+
+    plt.close(fig)
+
     stats = {
         "first_shapes": first_shapes,
         "n_batches_used": n_batches_used,
@@ -180,6 +196,4 @@ def inspect_dataloader(
     }
 
     print(stats)
-    plt.show()
-    
-    return
+    return stats
