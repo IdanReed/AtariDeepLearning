@@ -170,9 +170,9 @@ def inspect_dataloader(
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        safe_title = title.replace(" ", "_").replace("/", "_")
-        fig.savefig(output_dir / f"{safe_title}.png", dpi=150)
-        print(f"Saved plot to {output_dir / f'{safe_title}.png'}")
+        safe_title = title.replace(" ", "_").replace("/", "_").lower()
+        fig.savefig(output_dir / f"dataloader_{safe_title}.png", dpi=150)
+        print(f"Saved plot to {output_dir / f'dataloader_{safe_title}.png'}")
     else:
         plt.show()
 

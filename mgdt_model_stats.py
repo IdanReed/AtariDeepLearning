@@ -1,29 +1,38 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-
-# Set seaborn style
 sns.set_style("whitegrid")
 sns.set_palette("husl")
 
 
+def _save_or_show(fig: plt.Figure, output_dir: Optional[Path], filename: str) -> None:
+    """Save figure to output_dir if provided, otherwise show it."""
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filepath = output_dir / f"{filename}.png"
+        fig.savefig(filepath, dpi=150, bbox_inches='tight')
+        print(f"Saved plot to {filepath}")
+        plt.close(fig)
+    else:
+        plt.show()
+
+
 def _extract(stats: List[Dict[str, Any]], key: str) -> np.ndarray:
-    """Extract a key from all stats dictionaries into a numpy array."""
     return np.array([s[key] for s in stats], dtype=float)
 
 
 def _extract_optional(stats: List[Dict[str, Any]], key: str, default: Any = 0) -> np.ndarray:
-    """Extract a key from stats, using default if key doesn't exist."""
     return np.array([s.get(key, default) for s in stats], dtype=float)
 
 
 def _compute_ema(values: np.ndarray, alpha: float = 0.99) -> np.ndarray:
-    """Compute exponential moving average of values."""
     ema = np.zeros_like(values)
     ema[0] = values[0]
     for i in range(1, len(values)):
@@ -32,7 +41,6 @@ def _compute_ema(values: np.ndarray, alpha: float = 0.99) -> np.ndarray:
 
 
 def _get_epoch_boundaries(train_stats: List[Dict[str, Any]]) -> List[int]:
-    """Get global_step values where epochs end."""
     boundaries = []
     if not train_stats:
         return boundaries
@@ -55,16 +63,7 @@ def _get_epoch_boundaries(train_stats: List[Dict[str, Any]]) -> List[int]:
 def _extract_loss_data(
     train_stats: List[Dict[str, Any]], val_stats: Optional[List[Dict[str, Any]]] = None
 ) -> Tuple[np.ndarray, Dict[str, np.ndarray], Optional[np.ndarray], Optional[Dict[str, np.ndarray]], Optional[np.ndarray]]:
-    """
-    Extract loss data from stats dictionaries.
-    
-    Returns:
-        train_steps: Training step numbers (global_step if available, else step)
-        train_losses: Dict with keys 'loss', 'loss_return', 'loss_action', 'loss_reward'
-        val_steps: Validation step numbers (None if no validation)
-        val_losses: Dict with same keys as train_losses (None if no validation)
-        val_is_mid_epoch: Boolean array indicating mid-epoch validation (None if no validation)
-    """
+
     # Use global_step if available, fallback to step
     if train_stats and "global_step" in train_stats[0]:
         train_steps = _extract(train_stats, "global_step")
@@ -98,10 +97,6 @@ def _extract_loss_data(
 
 
 def _aggregate_validation_stats(val_stats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Aggregate per-batch validation stats into per-validation-run stats.
-    Groups by (epoch, global_step, is_mid_epoch) and averages losses/accuracies.
-    """
     if not val_stats:
         return []
     
@@ -191,6 +186,7 @@ def _plot_per_head_losses(
     val_is_mid_epoch: Optional[np.ndarray],
     title_prefix: str,
     epoch_boundaries: Optional[List[int]] = None,
+    output_dir: Optional[Path] = None,
 ) -> None:
     """Create 2x2 subplot grid showing per-head losses."""
     colors = sns.color_palette("husl", 4)
@@ -224,7 +220,8 @@ def _plot_per_head_losses(
         )
     
     plt.tight_layout()
-    plt.show()
+    safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
+    _save_or_show(fig, output_dir, f"model_{safe_prefix}_losses_per_head")
 
 
 def _plot_combined_losses(
@@ -235,6 +232,7 @@ def _plot_combined_losses(
     val_is_mid_epoch: Optional[np.ndarray],
     title_prefix: str,
     epoch_boundaries: Optional[List[int]] = None,
+    output_dir: Optional[Path] = None,
 ) -> None:
     """Create a single plot showing all losses together."""
     colors = sns.color_palette("husl", 4)
@@ -298,7 +296,8 @@ def _plot_combined_losses(
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.show()
+    safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
+    _save_or_show(fig, output_dir, f"model_{safe_prefix}_losses_combined")
 
 
 def _plot_ema_losses(
@@ -310,8 +309,8 @@ def _plot_ema_losses(
     title_prefix: str,
     epoch_boundaries: Optional[List[int]] = None,
     alpha: float = 0.99,
+    output_dir: Optional[Path] = None,
 ) -> None:
-    """Create plots showing EMA smoothed losses."""
     colors = sns.color_palette("husl", 4)
     loss_configs = [
         ("loss", "Total Loss", colors[0]),
@@ -325,6 +324,8 @@ def _plot_ema_losses(
     
     # For validation, we don't apply EMA since these are sparse points
     val_emas = val_losses  # Keep as-is
+    
+    safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
     
     # Per-head EMA
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
@@ -350,7 +351,7 @@ def _plot_ema_losses(
         )
     
     plt.tight_layout()
-    plt.show()
+    _save_or_show(fig, output_dir, f"model_{safe_prefix}_losses_ema_per_head")
     
     # Combined EMA plot
     fig2, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -404,7 +405,7 @@ def _plot_ema_losses(
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.show()
+    _save_or_show(fig2, output_dir, f"model_{safe_prefix}_losses_ema_combined")
 
 
 def plot_losses(
@@ -412,17 +413,8 @@ def plot_losses(
     val_stats: Optional[List[Dict[str, Any]]] = None,
     title_prefix: str = "",
     aggregate_validation: bool = True,
+    output_dir: Optional[Path] = None,
 ) -> None:
-    """
-    Plot training and validation losses.
-    
-    Args:
-        train_stats: List of training stats dictionaries
-        val_stats: Optional list of validation stats dictionaries
-        title_prefix: Prefix for plot titles
-        aggregate_validation: If True, aggregate per-batch validation stats 
-                             into per-validation-run averages
-    """
     if not train_stats:
         raise ValueError("train_stats is empty")
     
@@ -440,15 +432,15 @@ def plot_losses(
     
     _plot_per_head_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch, 
-        title_prefix, epoch_boundaries
+        title_prefix, epoch_boundaries, output_dir
     )
     _plot_combined_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch,
-        title_prefix, epoch_boundaries
+        title_prefix, epoch_boundaries, output_dir
     )
     _plot_ema_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch,
-        title_prefix, epoch_boundaries
+        title_prefix, epoch_boundaries, output_dir=output_dir
     )
 
 
@@ -460,25 +452,14 @@ def plot_holdout_comparison(
     title_prefix: str = "",
     aggregate_validation: bool = True,
     ema_alpha: float = 0.9,
+    output_dir: Optional[Path] = None,
 ) -> None:
-    """
-    Plot comparison between main training and holdout game adaptation.
-    
-    Shows how quickly the model adapts to holdout games compared to initial training.
-    
-    Args:
-        main_train_stats: Training stats from main game training
-        main_val_stats: Validation stats from main game training
-        holdout_train_stats: Training stats from holdout game fine-tuning
-        holdout_val_stats: Validation stats from holdout game fine-tuning
-        title_prefix: Prefix for plot titles
-        aggregate_validation: If True, aggregate per-batch validation stats
-        ema_alpha: Alpha for EMA smoothing
-    """
     if not main_train_stats:
         raise ValueError("main_train_stats is empty")
     if not holdout_train_stats:
         raise ValueError("holdout_train_stats is empty")
+    
+    safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "holdout"
     
     # Aggregate validation stats
     proc_main_val = main_val_stats
@@ -542,7 +523,7 @@ def plot_holdout_comparison(
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.show()
+    _save_or_show(fig, output_dir, f"comparison_{safe_prefix}_main_vs_holdout")
     
     # Plot 2: Per-head loss comparison
     loss_keys = ["loss_return", "loss_action", "loss_reward"]
@@ -568,7 +549,7 @@ def plot_holdout_comparison(
         ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.show()
+    _save_or_show(fig2, output_dir, f"comparison_{safe_prefix}_per_head_loss")
     
     # Plot 3: Accuracy comparison
     acc_keys = ["return_acc", "action_acc", "reward_acc"]
@@ -594,7 +575,7 @@ def plot_holdout_comparison(
         ax.set_ylim(0, 1)
     
     plt.tight_layout()
-    plt.show()
+    _save_or_show(fig3, output_dir, f"comparison_{safe_prefix}_accuracy")
     
     # Print summary statistics
     print("\n" + "="*60)
