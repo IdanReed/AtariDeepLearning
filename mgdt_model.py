@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple, Enum
 
 import torch
 import torch.nn as nn
@@ -8,6 +8,22 @@ import torch.nn.functional as F
 
 from encoders import ObsEncoder
 
+
+class Freezeable(Enum):
+    """
+    These names must match the attribute names of the model
+    """
+    Transformer = "transformer"
+    ObsEncoder = "obs_encoder"
+    # I don't think these are really needed but adding them for completeness
+    ReturnEmbed = "return_embed"
+    ActionEmbed = "action_embed"
+    RewardEmbed = "reward_embed"
+    PosEmbed = "pos_embed"
+    TypeEmbed = "type_embed"
+    ReturnHead = "return_head"
+    ActionHead = "action_head"
+    RewardHead = "reward_head"
 
 class MGDTModel(nn.Module):
     TYPE_OBS = 0
@@ -276,3 +292,17 @@ class MGDTModel(nn.Module):
             "loss_reward": float(loss_r.item()),
         }
         return out, total, stats
+
+    def freeze(self, components: List[Freezeable]) -> None:
+        for component in components:
+            module = getattr(self, component.value)
+            module.eval()
+            for param in module.parameters():
+                param.requires_grad = False
+
+    def unfreeze(self, components: List[Freezeable]) -> None:
+        for component in components:
+            module = getattr(self, component.value)
+            module.train()
+            for param in module.parameters():
+                param.requires_grad = True
