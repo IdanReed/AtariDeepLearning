@@ -12,7 +12,6 @@ from episode_dataset import EpisodeSliceDataset, BinningInfo
 from encoders import PatchEncoder, CNNEncoder
 from mgdt_model import MGDTModel
 
-
 def _ensure_device(device: Optional[torch.device]) -> torch.device:
     if device is not None:
         return device
@@ -20,52 +19,9 @@ def _ensure_device(device: Optional[torch.device]) -> torch.device:
         raise ValueError("No GPU found and I think you want one")
     return torch.device("cuda")
 
-
-def evaluate_mgdt(
-    model: MGDTModel,
-    dataloader: DataLoader,
-    device: torch.device,
-) -> List[dict[str, Any]]:
-    model.eval()
-    eval_stats: List[dict[str, Any]] = []
-
-    with torch.no_grad():
-        for step, batch in enumerate(tqdm(dataloader, desc="Validation"), start=1):
-            frames = batch["frames"].to(device)
-            actions = batch["model_selected_actions"].to(device)
-            rtg_bins = batch["rtg_bins"].to(device)
-            reward_bins = batch["reward_bins"].to(device)
-
-            loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
-
-            out = model(frames, rtg_bins, actions, reward_bins)
-            ret_pred = out["return_logits"].argmax(dim=-1)
-            act_pred = out["action_logits"].argmax(dim=-1)
-            rew_pred = out["reward_logits"].argmax(dim=-1)
-
-            ret_acc = (ret_pred == rtg_bins).float().mean().item()
-            act_acc = (act_pred == actions).float().mean().item()
-            rew_acc = (rew_pred == reward_bins).float().mean().item()
-
-            stats = {
-                "step": step,
-                "loss": float(loss.item()),
-                "loss_return": float(stats["loss_return"]),
-                "loss_action": float(stats["loss_action"]),
-                "loss_reward": float(stats["loss_reward"]),
-                "return_acc": ret_acc,
-                "action_acc": act_acc,
-                "reward_acc": rew_acc,
-            }
-            eval_stats.append(stats)
-
-    return eval_stats
-
-
 class Encoder(Enum):
     Patch = "patch"
     CNN = "cnn"
-
 
 def train_mgdt(
     bins: BinningInfo,
@@ -167,6 +123,45 @@ def train_mgdt(
 
     val_stats: List[dict[str, Any]] = []
     if dataloader_val is not None:
-        val_stats = evaluate_mgdt(model, dataloader_val, device)
+        val_stats = _evaluate_mgdt(model, dataloader_val, device)
 
     return model, train_stats, val_stats
+
+def _evaluate_mgdt(
+    model: MGDTModel,
+    dataloader: DataLoader,
+    device: torch.device,
+) -> List[dict[str, Any]]:
+    model.eval()
+    eval_stats: List[dict[str, Any]] = []
+
+    with torch.no_grad():
+        for step, batch in enumerate(tqdm(dataloader, desc="Validation"), start=1):
+            frames = batch["frames"].to(device)
+            actions = batch["model_selected_actions"].to(device)
+            rtg_bins = batch["rtg_bins"].to(device)
+            reward_bins = batch["reward_bins"].to(device)
+
+            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
+
+            ret_pred = out["return_logits"].argmax(dim=-1)
+            act_pred = out["action_logits"].argmax(dim=-1)
+            rew_pred = out["reward_logits"].argmax(dim=-1)
+
+            ret_acc = (ret_pred == rtg_bins).float().mean().item()
+            act_acc = (act_pred == actions).float().mean().item()
+            rew_acc = (rew_pred == reward_bins).float().mean().item()
+
+            stats = {
+                "step": step,
+                "loss": float(loss.item()),
+                "loss_return": float(stats["loss_return"]),
+                "loss_action": float(stats["loss_action"]),
+                "loss_reward": float(stats["loss_reward"]),
+                "return_acc": ret_acc,
+                "action_acc": act_acc,
+                "reward_acc": rew_acc,
+            }
+            eval_stats.append(stats)
+
+    return eval_stats

@@ -246,8 +246,7 @@ class MGDTModel(nn.Module):
         frames: torch.Tensor,
         rtg_bins: torch.Tensor,
         actions: torch.Tensor,
-        reward_bins: torch.Tensor,
-        logits: Dict[str, torch.Tensor]
+        reward_bins: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
 
         out = self.forward(frames, rtg_bins, actions, reward_bins)
