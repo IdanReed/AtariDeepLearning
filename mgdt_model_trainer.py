@@ -65,8 +65,6 @@ def train_mgdt(
     finetune_lr_factor: float = 0.1,
     weight_decay: float = 0.01,
     device: Optional[torch.device] = None,
-    pretrained_path: Optional[str] = None,
-    freeze_mode: Optional[str] = None, 
 ) -> Tuple[MGDTModel, List[dict[str, Any]], List[dict[str, Any]]]:
 
     device = _ensure_device(device)
@@ -91,17 +89,13 @@ def train_mgdt(
             n_heads=n_heads,
             max_timestep_window_size=max_timestep_window_size,
         ).to(device)
-
-        if pretrained_path:
-            model = load_pretrained_and_freeze(model, pretrained_path, freeze_mode)
-            model = model.to(device)
-        
     else:
         model = model.to(device)
 
-    # Adjust learning rate for fine-tuning
+    # Reduce LR for finetuning
     effective_lr = lr * finetune_lr_factor if is_finetuning else lr
-    # Optimizer must only see trainable parameters, else it wastes memory/compute tracking 0 gradients
+
+    # Optimizer
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()), 
         lr=effective_lr, 
@@ -266,87 +260,3 @@ def _evaluate_mgdt(
             })
 
     return eval_stats
-
-def load_pretrained_and_freeze(
-    model: MGDTModel, 
-    weights_path: str, 
-    freeze_mode: str = None
-) -> MGDTModel:
-    """
-    Loads weights from a pickle file and freezes layers based on the mode.
-    
-    Args:
-        model: initialized MGDTModel instance
-        weights_path: path to the .pkl file containing the state_dict
-        freeze_mode: One of "encoder", "decoder", "both", or None
-                     - "encoder": Freezes the ObsEncoder and all input embeddings
-                     - "decoder": Freezes the Transformer backbone
-                     - "both": Freezes everything except the linear heads
-    """
-    
-    # 1. Load the Pretrained Weights
-    print(f"Loading weights from {weights_path}...")
-    try:
-        # assume the pkl contains the state_dict
-        #TODO: map_location may need to be changed to cuda
-        state_dict = torch.load(weights_path, map_location="cpu")
-        
-        # Handle cases where the pkl might be the entire object vs state_dict
-        if isinstance(state_dict, MGDTModel):
-            state_dict = state_dict.state_dict()
-            
-        msg = model.load_state_dict(state_dict, strict=False)
-        print(f"Weights loaded. Missing keys: {msg.missing_keys}")
-    except Exception as e:
-        print(f"Error loading weights: {e}")
-        return model
-
-    if freeze_mode is None:
-        return model
-
-    freeze_mode = freeze_mode.lower()
-    print(f"Freezing network parts. Mode: {freeze_mode}")
-
-    # The "Encoder" includes the visual encoder AND the scalar embeddings 
-    encoder_components = [
-        model.obs_encoder,
-        model.return_embed,
-        model.action_embed,
-        model.reward_embed,
-        model.pos_embed,
-        model.type_embed
-    ]
-    
-    # The "Decoder" is the Transformer Stack
-    decoder_components = [
-        model.transformer
-    ]
-
-
-    components_to_freeze = []
-    
-    if freeze_mode == "encoder":
-        components_to_freeze.extend(encoder_components)
-    elif freeze_mode == "decoder":
-        components_to_freeze.extend(decoder_components)
-    elif freeze_mode == "both":
-        components_to_freeze.extend(encoder_components)
-        components_to_freeze.extend(decoder_components)
-    else:
-        raise ValueError(f"Unknown freeze mode: {freeze_mode}")
-
-    # Set requires_grad = False
-    for module in components_to_freeze:
-        # put module in eval mode so Dropout/BatchNorm (if any) are deterministic
-        module.eval() 
-        for param in module.parameters():
-            param.requires_grad = False
-
-    # Verify what is trainable if needed for sanity check
-    """
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Freezing complete. Trainable params: {trainable_params:,} / {total_params:,}")
-    """
-
-    return model
