@@ -36,7 +36,7 @@ def evaluate_mgdt(
             rtg_bins = batch["rtg_bins"].to(device)
             reward_bins = batch["reward_bins"].to(device)
 
-            loss, stats = model.compute_loss(frames, rtg_bins, actions, reward_bins)
+            loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
 
             out = model(frames, rtg_bins, actions, reward_bins)
             ret_pred = out["return_logits"].argmax(dim=-1)
@@ -109,21 +109,25 @@ def train_mgdt(
     train_stats: List[dict[str, Any]] = []
 
     for step, batch in enumerate(tqdm(dataloader_train, desc="Training"), start=1):
-        frames = batch["frames"].to(device)           # (B, T, C, H, W)
+        frames = batch["frames"].to(device)                         # (B, n_timesteps, n_channels, img_height, img_width)
+
         # I think predicting model selected action is more important than taken action
         # otherwise there just noise forced on top of the policy/behavior that our model is attempting to replicated
-        actions = batch["model_selected_actions"].to(device)         # (B, T)
-        rtg_bins = batch["rtg_bins"].to(device)       # (B, T)
-        reward_bins = batch["reward_bins"].to(device) # (B, T)
+        actions = batch["model_selected_actions"].to(device)        # (B, n_timesteps)
+        rtg_bins = batch["rtg_bins"].to(device)                     # (B, n_timesteps)
+        reward_bins = batch["reward_bins"].to(device)               # (B, n_timesteps)
 
         model.train()
         optimizer.zero_grad()
 
-        loss, stats = model.compute_loss(frames, rtg_bins, actions, reward_bins)
+        # Forward
+        out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
+        
+        # Backward
         loss.backward()
+        
+        # Clip grad and calc grad norm
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
-        # gradient norm
         total_grad_norm = 0.0
         for p in model.parameters():
             if p.grad is not None:
@@ -131,11 +135,11 @@ def train_mgdt(
                 total_grad_norm += param_norm.item() ** 2
         total_grad_norm = total_grad_norm ** 0.5
 
+        # Optimize step
         optimizer.step()
 
-        # accuracies
+        # Calc accuracy
         with torch.no_grad():
-            out = model(frames, rtg_bins, actions, reward_bins)
             ret_pred = out["return_logits"].argmax(dim=-1)
             act_pred = out["action_logits"].argmax(dim=-1)
             rew_pred = out["reward_logits"].argmax(dim=-1)
@@ -147,11 +151,14 @@ def train_mgdt(
         train_stats.append(
             {
                 "step": step,
+
                 "loss": float(loss.item()),
                 "loss_return": float(stats["loss_return"]),
                 "loss_action": float(stats["loss_action"]),
                 "loss_reward": float(stats["loss_reward"]),
+
                 "grad_norm": float(total_grad_norm),
+
                 "return_acc": ret_acc,
                 "action_acc": act_acc,
                 "reward_acc": rew_acc,

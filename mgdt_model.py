@@ -241,14 +241,17 @@ class MGDTModel(nn.Module):
             "reward_logits": reward_logits,
         }
 
-    def compute_loss(
+    def forward_and_compute_loss(
         self,
         frames: torch.Tensor,
         rtg_bins: torch.Tensor,
         actions: torch.Tensor,
         reward_bins: torch.Tensor,
+        logits: Dict[str, torch.Tensor]
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
+
         out = self.forward(frames, rtg_bins, actions, reward_bins)
+        
         B, T = actions.shape
 
         loss_R = F.cross_entropy(
@@ -273,4 +276,4 @@ class MGDTModel(nn.Module):
             "loss_action": float(loss_A.item()),
             "loss_reward": float(loss_r.item()),
         }
-        return total, stats
+        return out, total, stats

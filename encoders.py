@@ -125,7 +125,7 @@ class CNNEncoder(ObsEncoder):
         flat_batch_size, feat_height, feat_width, out_channels = spatial_features.shape
         flattened_features = spatial_features.reshape(
             flat_batch_size, feat_height * feat_width, out_channels
-        )                                                                                                   # (batch_size * n_timesteps, num_obs_tokens, 64)
+        )                                                                                               # (batch_size * n_timesteps, num_obs_tokens, 64)
         
         # Linear projection to emb_size
         obs_tokens = self.proj(flattened_features)                                                      # (batch_size * n_timesteps, num_obs_tokens, emb_size)
