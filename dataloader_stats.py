@@ -20,6 +20,7 @@ def inspect_dataloader(
     max_batches: int = 50,
     output_dir: Optional[Path] = None,
     max_bars_for_labels: int = 20,
+    print_stats: bool = False,
 ) -> dict[str, Any]:
     all_actions = []
     all_rewards = []
@@ -77,21 +78,7 @@ def inspect_dataloader(
 
     game_counts = Counter(all_game_names)
 
-    print(f"=== Dataloader Sanity Check: {title} ===")
-    print(f"Used batches: {n_batches_used}")
-    print(f"First batch shapes: {first_shapes}")
-    print(f"Total samples (timesteps): {actions_np.shape[0]}")
-    print(f"Games in subset: {len(game_counts)} -> {dict(game_counts)}")
-    print(f"Actions: min={actions_np.min()}, max={actions_np.max()}, "
-          f"unique={len(np.unique(actions_np))}")
-    print(f"Rewards: min={rewards_np.min():.3f}, max={rewards_np.max():.3f}")
-    print(f"RTG: min={rtg_np.min():.3f}, max={rtg_np.max():.3f}")
-    print(f"Reward bins: unique={np.unique(reward_bins_np)}")
-    print(f"RTG bins: min={rtg_bins_np.min()}, max={rtg_bins_np.max()}")
 
-    # NaN / inf checks
-    print(f"NaNs in rewards? {np.isnan(rewards_np).any()}")
-    print(f"NaNs in RTG? {np.isnan(rtg_np).any()}")
 
     colors = sns.color_palette("husl", 6)
     
@@ -173,8 +160,7 @@ def inspect_dataloader(
         safe_title = title.replace(" ", "_").replace("/", "_").lower()
         fig.savefig(output_dir / f"dataloader_{safe_title}.png", dpi=150)
         print(f"Saved plot to {output_dir / f'dataloader_{safe_title}.png'}")
-    else:
-        plt.show()
+    plt.show()
 
     plt.close(fig)
 
@@ -195,5 +181,24 @@ def inspect_dataloader(
         "rtg_bins_max": int(rtg_bins_np.max()),
     }
 
-    print(stats)
+    print(f"Dataloader size: {len(dataloader)}")
+    
+    if print_stats:
+        print(f"=== Dataloader Sanity Check: {title} ===")
+        print(f"Used batches: {n_batches_used}")
+        print(f"First batch shapes: {first_shapes}")
+        print(f"Total samples (timesteps): {actions_np.shape[0]}")
+        print(f"Games in subset: {len(game_counts)} -> {dict(game_counts)}")
+        print(f"Actions: min={actions_np.min()}, max={actions_np.max()}, "
+            f"unique={len(np.unique(actions_np))}")
+        print(f"Rewards: min={rewards_np.min():.3f}, max={rewards_np.max():.3f}")
+        print(f"RTG: min={rtg_np.min():.3f}, max={rtg_np.max():.3f}")
+        print(f"Reward bins: unique={np.unique(reward_bins_np)}")
+        print(f"RTG bins: min={rtg_bins_np.min()}, max={rtg_bins_np.max()}")
+
+        # NaN / inf checks
+        print(f"NaNs in rewards? {np.isnan(rewards_np).any()}")
+        print(f"NaNs in RTG? {np.isnan(rtg_np).any()}")
+        print(stats)
+
     return stats
