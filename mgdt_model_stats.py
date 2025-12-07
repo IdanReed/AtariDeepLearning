@@ -11,17 +11,14 @@ sns.set_style("whitegrid")
 sns.set_palette("husl")
 
 
-def _save_or_show(fig: plt.Figure, output_dir: Optional[Path], filename: str) -> None:
-    """Save figure to output_dir if provided, otherwise show it."""
+def _save_and_show(fig: plt.Figure, output_dir: Optional[Path], filename: str) -> None:
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         filepath = output_dir / f"{filename}.png"
         fig.savefig(filepath, dpi=150, bbox_inches='tight')
         print(f"Saved plot to {filepath}")
-        plt.close(fig)
-    else:
-        plt.show()
+    plt.show()
 
 
 def _extract(stats: List[Dict[str, Any]], key: str) -> np.ndarray:
@@ -221,7 +218,7 @@ def _plot_per_head_losses(
     
     plt.tight_layout()
     safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
-    _save_or_show(fig, output_dir, f"model_{safe_prefix}_losses_per_head")
+    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_per_head")
 
 
 def _plot_combined_losses(
@@ -297,7 +294,7 @@ def _plot_combined_losses(
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
-    _save_or_show(fig, output_dir, f"model_{safe_prefix}_losses_combined")
+    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_combined")
 
 
 def _plot_ema_losses(
@@ -351,7 +348,7 @@ def _plot_ema_losses(
         )
     
     plt.tight_layout()
-    _save_or_show(fig, output_dir, f"model_{safe_prefix}_losses_ema_per_head")
+    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_ema_per_head")
     
     # Combined EMA plot
     fig2, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -405,7 +402,7 @@ def _plot_ema_losses(
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    _save_or_show(fig2, output_dir, f"model_{safe_prefix}_losses_ema_combined")
+    _save_and_show(fig2, output_dir, f"model_{safe_prefix}_losses_ema_combined")
 
 
 def plot_losses(
@@ -523,7 +520,7 @@ def plot_holdout_comparison(
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    _save_or_show(fig, output_dir, f"comparison_{safe_prefix}_main_vs_holdout")
+    _save_and_show(fig, output_dir, f"comparison_{safe_prefix}_main_vs_holdout")
     
     # Plot 2: Per-head loss comparison
     loss_keys = ["loss_return", "loss_action", "loss_reward"]
@@ -549,7 +546,7 @@ def plot_holdout_comparison(
         ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    _save_or_show(fig2, output_dir, f"comparison_{safe_prefix}_per_head_loss")
+    _save_and_show(fig2, output_dir, f"comparison_{safe_prefix}_per_head_loss")
     
     # Plot 3: Accuracy comparison
     acc_keys = ["return_acc", "action_acc", "reward_acc"]
@@ -575,7 +572,7 @@ def plot_holdout_comparison(
         ax.set_ylim(0, 1)
     
     plt.tight_layout()
-    _save_or_show(fig3, output_dir, f"comparison_{safe_prefix}_accuracy")
+    _save_and_show(fig3, output_dir, f"comparison_{safe_prefix}_accuracy")
     
     # Print summary statistics
     print("\n" + "="*60)
