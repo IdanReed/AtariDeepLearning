@@ -60,3 +60,8 @@ def sample_list(items: List[Any], fraction: float = 0.1) -> List[Any]:
     sampled = random.sample(items, sample_size)
     print(f"Sampled {len(sampled)} items ({len(sampled)/len(items)*100:.1f}% of {len(items)} total)")
     return sampled
+
+def seed_random_generators(seed: int = 666):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    return

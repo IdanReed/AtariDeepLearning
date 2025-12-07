@@ -8,22 +8,22 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 
-def discover_games(root_dir: Path) -> list[Path]:
+def _discover_games(root_dir: Path) -> list[Path]:
     paths = root_dir.glob("*/*")
     return list(paths)
 
-def discover_npz(game_dir: Path) -> list[Path]:
+def _discover_npz(game_dir: Path) -> list[Path]:
     npz_files = game_dir.glob("*.npz")
     return list(npz_files)
 
-def discover_game_npz_paths(paths: list[Path]) -> Dict[str, Any]:
+def _discover_game_npz_paths(paths: list[Path]) -> Dict[str, Any]:
     game_npz_paths = {}
     for path in paths:
-        game_npz_paths[path] = discover_npz(path)
+        game_npz_paths[path] = _discover_npz(path)
 
     return game_npz_paths
 
-def get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
+def _get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
     # Game -> dicts each represents one gameplay sequence
     # actually we should be splitting this by episode
     game_to_sequences: Dict[Path, List[dict]] = {}
@@ -37,7 +37,7 @@ def get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
     
     return game_to_sequences
 
-def fix_obs_paths(
+def _fix_obs_paths(
     game_to_sequences: Dict[Path, List[dict]],
     dataset_root: str | Path = "dataset",
 ):
@@ -87,7 +87,7 @@ def fix_obs_paths(
 
 from episode import Episode, TimeStep
 
-def build_episodes_from_sequences(
+def _build_episodes_from_sequences(
     sequences_by_game: Dict[Path, List[dict]],
 ) -> List[Episode]:
     episodes: List[Episode] = []
@@ -136,4 +136,15 @@ def build_episodes_from_sequences(
                 if timesteps:
                     episodes.append(Episode(game_name=game_name, timesteps=timesteps))
 
+    return episodes
+
+def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path]) -> List[Episode]:
+    all_game_dirs = main_game_dirs + holdout_game_dirs
+
+    npz_paths_by_game = _discover_game_npz_paths(all_game_dirs)
+    game_to_sequences = _get_sequences_by_game(npz_paths_by_game)
+    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root="dataset")
+    episodes = _build_episodes_from_sequences(sequences_by_game)
+
+    print(f"Loaded {len(episodes)} episodes")
     return episodes
