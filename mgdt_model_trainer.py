@@ -28,7 +28,10 @@ def _create_subset_dataloader(
     fraction: float,
     seed: int,
 ) -> DataLoader:
-    """Create a deterministic subset dataloader using seeded random sampling."""
+    """
+    We want to be able to see validation loss during an epoch, because our dataset is quite large.
+    So we'll sample a subset of the validation dataset to periodically test on mid-epoch.
+    """
     dataset = dataloader.dataset
     n_samples = max(1, int(len(dataset) * fraction))
     generator = torch.Generator().manual_seed(seed)
@@ -47,6 +50,7 @@ def train_mgdt(
     dataloader_train: DataLoader,
     dataloader_val: Optional[DataLoader] = None,
     *,
+    model: Optional[MGDTModel] = None,
     num_epochs: int = 1,
     val_every_pct: float = 0.2,
     mid_epoch_val_fraction: float = 0.25,
@@ -58,32 +62,39 @@ def train_mgdt(
     n_heads: int = 8,
     max_timestep_window_size: int = 32,
     lr: float = 3e-4,
+    finetune_lr_factor: float = 0.1,
     weight_decay: float = 0.01,
     device: Optional[torch.device] = None,
 ) -> Tuple[MGDTModel, List[dict[str, Any]], List[dict[str, Any]]]:
+
     device = _ensure_device(device)
 
-    # Encoder
-    if encoder_type == Encoder.CNN:
-        encoder = CNNEncoder(image_size=image_size, in_channels=3, emb_size=emb_size)
-    elif encoder_type == Encoder.Patch:
-        encoder = PatchEncoder(image_size=image_size, in_channels=3, emb_size=emb_size)
+    is_finetuning = model is not None
+    if not is_finetuning:
+        if encoder_type == Encoder.CNN:
+            encoder = CNNEncoder(image_size=image_size, in_channels=3, emb_size=emb_size)
+        elif encoder_type == Encoder.Patch:
+            encoder = PatchEncoder(image_size=image_size, in_channels=3, emb_size=emb_size)
 
-    n_actions = bins.n_actions
-    n_return_bins = bins.num_rtg_bins
+        n_actions = bins.n_actions
+        n_return_bins = bins.num_rtg_bins
 
-    model = MGDTModel(
-        obs_encoder=encoder,
-        n_actions=n_actions,
-        n_return_bins=n_return_bins,
-        n_reward_bins=3,
-        emb_size=emb_size,
-        n_layers=n_layers,
-        n_heads=n_heads,
-        max_timestep_window_size=max_timestep_window_size,
-    ).to(device)
+        model = MGDTModel(
+            obs_encoder=encoder,
+            n_actions=n_actions,
+            n_return_bins=n_return_bins,
+            n_reward_bins=3,
+            emb_size=emb_size,
+            n_layers=n_layers,
+            n_heads=n_heads,
+            max_timestep_window_size=max_timestep_window_size,
+        ).to(device)
+    else:
+        model = model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # Adjust learning rate for fine-tuning
+    effective_lr = lr * finetune_lr_factor if is_finetuning else lr
+    optimizer = torch.optim.AdamW(model.parameters(), lr=effective_lr, weight_decay=weight_decay)
 
     train_stats: List[dict[str, Any]] = []
     val_stats: List[dict[str, Any]] = []
@@ -100,10 +111,11 @@ def train_mgdt(
     val_interval = max(1, int(total_batches * val_every_pct))
 
     for epoch in range(1, num_epochs + 1):
+        desc_prefix = "Finetune" if is_finetuning else "Epoch"
         epoch_pbar = tqdm(
             enumerate(dataloader_train, start=1),
             total=total_batches,
-            desc=f"Epoch {epoch}/{num_epochs}",
+            desc=f"{desc_prefix} {epoch}/{num_epochs}",
         )
 
         for step_in_epoch, batch in epoch_pbar:
@@ -150,6 +162,7 @@ def train_mgdt(
                     "epoch": epoch,
                     "global_step": global_step,
                     "step_in_epoch": step_in_epoch,
+                    "is_finetune": is_finetuning,
 
                     "loss": float(loss.item()),
                     "loss_return": float(stats["loss_return"]),
@@ -176,6 +189,7 @@ def train_mgdt(
                     epoch=epoch,
                     global_step=global_step,
                     is_mid_epoch=True,
+                    is_finetune=is_finetuning,
                 )
                 val_stats.extend(mid_val_stats)
 
@@ -186,6 +200,7 @@ def train_mgdt(
                 epoch=epoch,
                 global_step=global_step,
                 is_mid_epoch=False,
+                is_finetune=is_finetuning,
             )
             val_stats.extend(end_epoch_val_stats)
 
@@ -199,6 +214,7 @@ def _evaluate_mgdt(
     epoch: int = 1,
     global_step: int = 0,
     is_mid_epoch: bool = False,
+    is_finetune: bool = False,
 ) -> List[dict[str, Any]]:
     model.eval()
     eval_stats: List[dict[str, Any]] = []
@@ -225,6 +241,7 @@ def _evaluate_mgdt(
                 "global_step": global_step,
                 "step": step,
                 "is_mid_epoch": is_mid_epoch,
+                "is_finetune": is_finetune,
 
                 "loss": float(loss.item()),
                 "loss_return": float(stats["loss_return"]),

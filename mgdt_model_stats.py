@@ -450,3 +450,174 @@ def plot_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch,
         title_prefix, epoch_boundaries
     )
+
+
+def plot_holdout_comparison(
+    main_train_stats: List[Dict[str, Any]],
+    main_val_stats: Optional[List[Dict[str, Any]]],
+    holdout_train_stats: List[Dict[str, Any]],
+    holdout_val_stats: Optional[List[Dict[str, Any]]],
+    title_prefix: str = "",
+    aggregate_validation: bool = True,
+    ema_alpha: float = 0.9,
+) -> None:
+    """
+    Plot comparison between main training and holdout game adaptation.
+    
+    Shows how quickly the model adapts to holdout games compared to initial training.
+    
+    Args:
+        main_train_stats: Training stats from main game training
+        main_val_stats: Validation stats from main game training
+        holdout_train_stats: Training stats from holdout game fine-tuning
+        holdout_val_stats: Validation stats from holdout game fine-tuning
+        title_prefix: Prefix for plot titles
+        aggregate_validation: If True, aggregate per-batch validation stats
+        ema_alpha: Alpha for EMA smoothing
+    """
+    if not main_train_stats:
+        raise ValueError("main_train_stats is empty")
+    if not holdout_train_stats:
+        raise ValueError("holdout_train_stats is empty")
+    
+    # Aggregate validation stats
+    proc_main_val = main_val_stats
+    proc_holdout_val = holdout_val_stats
+    if aggregate_validation:
+        if main_val_stats:
+            proc_main_val = _aggregate_validation_stats(main_val_stats)
+        if holdout_val_stats:
+            proc_holdout_val = _aggregate_validation_stats(holdout_val_stats)
+    
+    # Extract data
+    main_steps = _extract(main_train_stats, "global_step") if "global_step" in main_train_stats[0] else _extract(main_train_stats, "step")
+    main_loss = _extract(main_train_stats, "loss")
+    main_loss_ema = _compute_ema(main_loss, ema_alpha)
+    
+    holdout_steps = _extract(holdout_train_stats, "global_step") if "global_step" in holdout_train_stats[0] else _extract(holdout_train_stats, "step")
+    holdout_loss = _extract(holdout_train_stats, "loss")
+    holdout_loss_ema = _compute_ema(holdout_loss, ema_alpha)
+    
+    # Get colors
+    main_color = sns.color_palette("husl", 4)[0]
+    holdout_color = sns.color_palette("husl", 4)[2]
+    
+    # Plot 1: Side-by-side loss comparison (normalized steps)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle((title_prefix + " Main vs Holdout Training").strip(), fontsize=14)
+    
+    # Left: Absolute steps
+    ax1 = axes[0]
+    ax1.plot(main_steps, main_loss_ema, label="Main Training", color=main_color, linewidth=2, alpha=0.8)
+    ax1.plot(holdout_steps, holdout_loss_ema, label="Holdout Fine-tune", color=holdout_color, linewidth=2, alpha=0.8)
+    
+    if proc_main_val:
+        main_val_steps = _extract(proc_main_val, "global_step")
+        main_val_loss = _extract(proc_main_val, "loss")
+        ax1.scatter(main_val_steps, main_val_loss, label="Main Val", color=main_color, marker='s', s=40, alpha=0.6)
+    
+    if proc_holdout_val:
+        holdout_val_steps = _extract(proc_holdout_val, "global_step")
+        holdout_val_loss = _extract(proc_holdout_val, "loss")
+        ax1.scatter(holdout_val_steps, holdout_val_loss, label="Holdout Val", color=holdout_color, marker='s', s=40, alpha=0.6)
+    
+    ax1.set_xlabel("Global Step")
+    ax1.set_ylabel("Loss (EMA)")
+    ax1.set_title("Training Progress (Absolute Steps)")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Right: Normalized to show relative learning speed
+    ax2 = axes[1]
+    # Normalize steps to [0, 1] for each phase
+    main_steps_norm = (main_steps - main_steps.min()) / (main_steps.max() - main_steps.min() + 1e-8)
+    holdout_steps_norm = (holdout_steps - holdout_steps.min()) / (holdout_steps.max() - holdout_steps.min() + 1e-8)
+    
+    ax2.plot(main_steps_norm, main_loss_ema, label="Main Training", color=main_color, linewidth=2, alpha=0.8)
+    ax2.plot(holdout_steps_norm, holdout_loss_ema, label="Holdout Fine-tune", color=holdout_color, linewidth=2, alpha=0.8)
+    ax2.set_xlabel("Normalized Progress (0-1)")
+    ax2.set_ylabel("Loss (EMA)")
+    ax2.set_title("Learning Speed Comparison")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Plot 2: Per-head loss comparison
+    loss_keys = ["loss_return", "loss_action", "loss_reward"]
+    loss_titles = ["Return Loss", "Action Loss", "Reward Loss"]
+    colors = sns.color_palette("husl", 3)
+    
+    fig2, axes2 = plt.subplots(1, 3, figsize=(15, 4))
+    fig2.suptitle((title_prefix + " Per-Head Loss: Main vs Holdout").strip(), fontsize=14)
+    
+    for idx, (loss_key, title) in enumerate(zip(loss_keys, loss_titles)):
+        ax = axes2[idx]
+        
+        main_loss_head = _compute_ema(_extract(main_train_stats, loss_key), ema_alpha)
+        holdout_loss_head = _compute_ema(_extract(holdout_train_stats, loss_key), ema_alpha)
+        
+        ax.plot(main_steps_norm, main_loss_head, label="Main", color=colors[idx], linewidth=2, alpha=0.8)
+        ax.plot(holdout_steps_norm, holdout_loss_head, label="Holdout", color=colors[idx], linewidth=2, alpha=0.8, linestyle='--')
+        
+        ax.set_xlabel("Normalized Progress")
+        ax.set_ylabel("Loss (EMA)")
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Plot 3: Accuracy comparison
+    acc_keys = ["return_acc", "action_acc", "reward_acc"]
+    acc_titles = ["Return Accuracy", "Action Accuracy", "Reward Accuracy"]
+    
+    fig3, axes3 = plt.subplots(1, 3, figsize=(15, 4))
+    fig3.suptitle((title_prefix + " Accuracy: Main vs Holdout").strip(), fontsize=14)
+    
+    for idx, (acc_key, title) in enumerate(zip(acc_keys, acc_titles)):
+        ax = axes3[idx]
+        
+        main_acc = _compute_ema(_extract(main_train_stats, acc_key), ema_alpha)
+        holdout_acc = _compute_ema(_extract(holdout_train_stats, acc_key), ema_alpha)
+        
+        ax.plot(main_steps_norm, main_acc, label="Main", color=colors[idx], linewidth=2, alpha=0.8)
+        ax.plot(holdout_steps_norm, holdout_acc, label="Holdout", color=colors[idx], linewidth=2, alpha=0.8, linestyle='--')
+        
+        ax.set_xlabel("Normalized Progress")
+        ax.set_ylabel("Accuracy (EMA)")
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(0, 1)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Print summary statistics
+    print("\n" + "="*60)
+    print("HOLDOUT ADAPTATION SUMMARY")
+    print("="*60)
+    print(f"Main training steps: {len(main_train_stats)}")
+    print(f"Holdout fine-tune steps: {len(holdout_train_stats)}")
+    print(f"\nMain training - Final loss (EMA): {main_loss_ema[-1]:.4f}")
+    print(f"Holdout fine-tune - Initial loss (EMA): {holdout_loss_ema[0]:.4f}")
+    print(f"Holdout fine-tune - Final loss (EMA): {holdout_loss_ema[-1]:.4f}")
+    print(f"Holdout loss reduction: {holdout_loss_ema[0] - holdout_loss_ema[-1]:.4f}")
+    
+    # Compute how quickly holdout reaches main's final loss
+    main_final = main_loss_ema[-1]
+    steps_to_match = None
+    for i, loss in enumerate(holdout_loss_ema):
+        if loss <= main_final:
+            steps_to_match = i + 1
+            break
+    
+    if steps_to_match:
+        pct = steps_to_match / len(holdout_loss_ema) * 100
+        print(f"\nHoldout reached main's final loss at step {steps_to_match} ({pct:.1f}% of fine-tuning)")
+    else:
+        print(f"\nHoldout did not reach main's final loss of {main_final:.4f}")
+    print("="*60)
