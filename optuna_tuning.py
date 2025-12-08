@@ -9,7 +9,7 @@ def run_optuna(train_loader, val_loader, bins):
         emb_size = trial.suggest_categorical('embedding_size', [64, 128, 256, 512, 1024])
         n_layers = trial.suggest_int('num_layers', 5, 10)
         n_heads = trial.suggest_int('num_heads', 2, 8)
-        num_epochs = trial.suggest_int('num_epochs', 10, 100)
+        num_epochs = trial.suggest_int('num_epochs', 1, 10)
 
         # Train the model with the suggested hyperparameters
         model, main_train_stats, main_val_stats = train_mgdt(
