@@ -12,14 +12,14 @@ def run_optuna(train_loader, val_loader, bins):
         num_epochs = trial.suggest_int('num_epochs', 10, 100)
 
         # Train the model with the suggested hyperparameters
-        loss = train_mgdt(
+        model, main_train_stats, main_val_stats = train_mgdt(
             lr=lr,
             n_layers=n_layers,
             n_heads=n_heads,
             num_epochs=num_epochs,
             emb_size=emb_size
         )
-        return loss
+        return main_val_stats[-1]['loss']
 
     study = optuna.create_study(direction='minimize')
     study.optimize(objective, n_trials=50)
