@@ -80,8 +80,9 @@ docs/_build/
 .pybuilder/
 target/
 
-# Jupyter Notebook
+# Jupyter Notebook (including colab notebook)
 .ipynb_checkpoints
+"model baseline with freezing.ipynb"
 
 # IPython
 profile_default/
