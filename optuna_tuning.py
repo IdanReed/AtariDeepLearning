@@ -13,6 +13,9 @@ def run_optuna(train_loader, val_loader, bins):
 
         # Train the model with the suggested hyperparameters
         model, main_train_stats, main_val_stats = train_mgdt(
+            bins=bins,
+            dataloader_train=train_loader,
+            dataloader_val=val_loader,
             lr=lr,
             n_layers=n_layers,
             n_heads=n_heads,
