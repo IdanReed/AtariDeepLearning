@@ -63,7 +63,8 @@ def _fix_obs_paths(
                     
                     new_obs = []
                     for s in arr:
-                        p = Path(str(s))
+                        split_path = str(s).split("\\")
+                        p = Path(split_path[0]).joinpath(*split_path[1:])
                         parts = p.parts
 
                         if inner_game_dir in parts:
@@ -143,7 +144,7 @@ def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path]) -> 
 
     npz_paths_by_game = _discover_game_npz_paths(all_game_dirs)
     game_to_sequences = _get_sequences_by_game(npz_paths_by_game)
-    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root="dataset")
+    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root="/content/dataset/dataset")
     episodes = _build_episodes_from_sequences(sequences_by_game)
 
     print(f"Loaded {len(episodes)} episodes")
