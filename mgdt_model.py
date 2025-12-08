@@ -37,7 +37,6 @@ class MGDTModel(nn.Module):
         obs_encoder: ObsEncoder,
         n_actions: int,
         n_return_bins: int,
-        n_games: int,
         n_reward_bins: int = 3,
         emb_size: int = 512,
         n_layers: int = 6,
@@ -53,7 +52,6 @@ class MGDTModel(nn.Module):
         self.d_model = emb_size
         self.n_actions = n_actions
         self.n_return_bins = n_return_bins
-        self.n_games = n_games
         self.n_reward_bins = n_reward_bins
         self.max_timestep_window_size = max_timestep_window_size
         self.loss_weights = loss_weights
@@ -66,7 +64,6 @@ class MGDTModel(nn.Module):
         self.return_embed = nn.Embedding(n_return_bins, emb_size)
         self.action_embed = nn.Embedding(n_actions, emb_size)
         self.reward_embed = nn.Embedding(n_reward_bins, emb_size)
-        self.game_embed = nn.Embedding(n_games, emb_size)
 
         # positional + type embeddings
         self.pos_embed = nn.Embedding(self.max_seq_len, emb_size)
@@ -99,7 +96,6 @@ class MGDTModel(nn.Module):
         rtg_bins: torch.Tensor,    # (B, T)
         actions: torch.Tensor,     # (B, T)
         reward_bins: torch.Tensor, # (B, T)
-        game_ids: torch.Tensor, #(B,)
     ) -> torch.Tensor:
         """
         Build token embeddings (with pos/type added) of shape (B, L, D),
@@ -146,11 +142,6 @@ class MGDTModel(nn.Module):
         type_ids = type_ids.unsqueeze(0).expand(batch_size, -1)  # (B, seq_len)
         
         seq_tokens = seq_tokens + self.pos_embed(pos_ids) + self.type_embed(type_ids)
-
-        game_emb = self.game_embed(game_ids)
-        game_emb = game_emb.unsqueeze(1)
-        seq_tokens = seq_tokens + game_emb
-        
         return seq_tokens
 
     def _build_attention_mask(self, n_timesteps: int, device: torch.device) -> torch.Tensor:
@@ -229,11 +220,10 @@ class MGDTModel(nn.Module):
         rtg_bins: torch.Tensor,    # (B, T)
         actions: torch.Tensor,     # (B, T)
         reward_bins: torch.Tensor, # (B, T)
-        game_ids: torch.Tensor, #(B,)
     ) -> Dict[str, torch.Tensor]:
         # Get tokens
         batch_size, n_timesteps, n_channels, img_height, img_width = frames.shape
-        seq_tokens = self._build_seq_tokens(frames, rtg_bins, actions, reward_bins, game_ids)
+        seq_tokens = self._build_seq_tokens(frames, rtg_bins, actions, reward_bins)
         device = frames.device
 
         # Attention mask
