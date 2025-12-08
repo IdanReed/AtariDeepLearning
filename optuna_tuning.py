@@ -6,11 +6,13 @@ def run_optuna(train_loader, val_loader, bins):
     def objective(trial):
         # Define the hyperparameter search space
         lr = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
-        emb_size = trial.suggest_categorical('embedding_size', [64, 128, 256, 512, 1024])
-        n_layers = trial.suggest_int('num_layers', 5, 10)
-        n_heads = trial.suggest_int('num_heads', 2, 8)
-        num_epochs = trial.suggest_int('num_epochs', 1, 10)
+        emb_size = trial.suggest_categorical('embedding_size', [64, 128, 256, 512])
+        n_layers = trial.suggest_int('num_layers', 2, 6)
+        n_heads = trial.suggest_int('num_heads', 1, 4)
+        num_epochs = trial.suggest_int('num_epochs', 1, 2)
 
+        print("Trial params:", trial.params)
+        
         # Ensure that emb_size is divisible by n_heads
         if emb_size % n_heads != 0:
             raise optuna.exceptions.TrialPruned()
@@ -29,6 +31,6 @@ def run_optuna(train_loader, val_loader, bins):
         return main_val_stats[-1]['loss']
 
     study = optuna.create_study(direction='minimize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=20)
     return study
         
