@@ -139,6 +139,8 @@ def _build_episodes_from_sequences(
 
     return episodes
 
+
+
 def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path]) -> List[Episode]:
     all_game_dirs = main_game_dirs + holdout_game_dirs
 
@@ -146,6 +148,13 @@ def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path]) -> 
     game_to_sequences = _get_sequences_by_game(npz_paths_by_game)
     sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root="/content/dataset/dataset")
     episodes = _build_episodes_from_sequences(sequences_by_game)
+
+    # Add game ids to episode
+    game_names = sorted({episode.game_name for episode in episodes})
+    name_to_id = {name: i for i, name in enumerate(game_names)}
+
+    for episode in episodes:
+        episode.assign_game_id(name_to_id)
 
     print(f"Loaded {len(episodes)} episodes")
     return episodes

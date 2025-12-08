@@ -23,8 +23,12 @@ class Episode():
     def __init__(self, game_name: str, timesteps: List[TimeStep]):
         self.game_name = game_name
         self.timesteps = timesteps
+        self.game_id = None
         self.calculate_rtg()
 
+    def assign_game_id(self, game_ids: dict):
+        self.game_id = game_ids[self.game_name]
+        
     def calculate_rtg(self):
         running_sum = 0
         for step in reversed(self.timesteps):

@@ -158,4 +158,6 @@ class EpisodeSliceDataset(Dataset):
             "game_name": episode.game_name,
             "episode_index": episode_index,
             "start_t": start_t,
+            "game_ids": episode.game_id
         }
+    

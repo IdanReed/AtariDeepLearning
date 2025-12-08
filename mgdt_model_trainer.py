@@ -79,10 +79,15 @@ def train_mgdt(
         n_actions = bins.n_actions
         n_return_bins = bins.num_rtg_bins
 
+        dataset = dataloader_train.dataset
+        all_game_ids = [ep.game_id for ep in dataset.episodes]
+        n_games = max(all_game_ids) + 1
+
         model = MGDTModel(
             obs_encoder=encoder,
             n_actions=n_actions,
             n_return_bins=n_return_bins,
+            n_games=n_games,
             n_reward_bins=3,
             emb_size=emb_size,
             n_layers=n_layers,
@@ -131,12 +136,14 @@ def train_mgdt(
             actions = batch["model_selected_actions"].to(device)
             rtg_bins = batch["rtg_bins"].to(device)
             reward_bins = batch["reward_bins"].to(device)
+            game_ids = batch["game_ids"].to(device)
+
 
             model.train()
             optimizer.zero_grad()
 
             # Forward
-            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
+            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins, game_ids)
 
             # Backward
             loss.backward()
@@ -231,6 +238,7 @@ def _evaluate_mgdt(
             actions = batch["model_selected_actions"].to(device)
             rtg_bins = batch["rtg_bins"].to(device)
             reward_bins = batch["reward_bins"].to(device)
+            game_ids = batch["game_ids"].to(device)
 
             out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
 
