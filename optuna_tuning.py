@@ -11,6 +11,10 @@ def run_optuna(train_loader, val_loader, bins):
         n_heads = trial.suggest_int('num_heads', 2, 8)
         num_epochs = trial.suggest_int('num_epochs', 1, 10)
 
+        # Ensure that emb_size is divisible by n_heads
+        if emb_size % n_heads != 0:
+            raise optuna.exceptions.TrialPruned()
+        
         # Train the model with the suggested hyperparameters
         model, main_train_stats, main_val_stats = train_mgdt(
             bins=bins,
