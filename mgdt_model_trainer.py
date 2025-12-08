@@ -240,7 +240,7 @@ def _evaluate_mgdt(
             reward_bins = batch["reward_bins"].to(device)
             game_ids = batch["game_ids"].to(device)
 
-            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins)
+            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins, game_ids)
 
             ret_pred = out["return_logits"].argmax(dim=-1)
             act_pred = out["action_logits"].argmax(dim=-1)
