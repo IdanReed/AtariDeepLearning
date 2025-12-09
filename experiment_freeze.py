@@ -21,7 +21,7 @@ def run_experiment_freeze(
     # Best params
     if best_params is None:
         from optuna_tuning import run_optuna
-        study = run_optuna(main_bundle.train_loader, main_bundle.val_loader, bins, num_epochs_range=(1, 1), emb_size_choices=[128], n_trials=1)
+        study = run_optuna(main_bundle.train_loader, main_bundle.val_loader, bins)
         best_params = study.best_params
     
     # Train with best params
