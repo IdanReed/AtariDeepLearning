@@ -150,7 +150,7 @@ def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path], is_
     npz_paths_by_game = _discover_game_npz_paths(all_game_dirs)
     game_to_sequences = _get_sequences_by_game(npz_paths_by_game)
     if is_collab:
-        dataset_root = "/content/dataset/dataset_collab"
+        dataset_root = "/content/dataset/dataset/"
     else:
         dataset_root = "dataset"
 
