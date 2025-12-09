@@ -60,8 +60,8 @@ def experiment_freeze(
 
     # Main plots
     from mgdt_model_stats import plot_losses, plot_holdout_comparison
-    plot_losses(main_train_stats, main_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Main")
-    plot_losses(holdout_train_stats, holdout_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Holdout")
-    plot_holdout_comparison(main_train_stats, main_val_stats, holdout_train_stats, holdout_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Comparison")
+    plot_losses(main_train_stats, main_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Main", no_show=True)
+    plot_losses(holdout_train_stats, holdout_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Holdout", no_show=True)
+    plot_holdout_comparison(main_train_stats, main_val_stats, holdout_train_stats, holdout_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Comparison", no_show=True)
 
     return best_params
