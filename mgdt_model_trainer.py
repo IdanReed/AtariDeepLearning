@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any, List, Tuple, Optional
 
 import torch
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from sklearn.metrics import f1_score
@@ -95,8 +96,14 @@ def train_mgdt(
             n_heads=n_heads,
             max_timestep_window_size=max_timestep_window_size,
         ).to(device)
+        
+        # Compile model for faster training (PyTorch 2.0+)
+        model = torch.compile(model)
     else:
         model = model.to(device)
+    
+    # Mixed precision scaler
+    scaler = GradScaler()
 
     # Reduce LR for finetuning
     effective_lr = lr * finetune_lr_factor if is_finetuning else lr
@@ -133,35 +140,33 @@ def train_mgdt(
         for step_in_epoch, batch in epoch_pbar:
             global_step += 1
 
-            frames = batch["frames"].to(device)
-            actions = batch["model_selected_actions"].to(device)
-            rtg_bins = batch["rtg_bins"].to(device)
-            reward_bins = batch["reward_bins"].to(device)
-            game_ids = batch["game_ids"].to(device)
-
+            frames = batch["frames"].to(device, non_blocking=True)
+            actions = batch["model_selected_actions"].to(device, non_blocking=True)
+            rtg_bins = batch["rtg_bins"].to(device, non_blocking=True)
+            reward_bins = batch["reward_bins"].to(device, non_blocking=True)
+            game_ids = batch["game_ids"].to(device, non_blocking=True)
 
             model.train()
             optimizer.zero_grad()
 
-            # Forward
-            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins, game_ids)
+            # Forward with AMP
+            with autocast('cuda'):
+                out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins, game_ids)
 
-            # Backward
-            loss.backward()
+            # Backward with scaler
+            scaler.scale(loss).backward()
 
-            # Clip grad and calc grad norm
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            total_grad_norm = 0.0
-            for p in model.parameters():
-                if p.grad is not None:
-                    param_norm = p.grad.data.norm(2)
-                    total_grad_norm += param_norm.item() ** 2
-            total_grad_norm = total_grad_norm ** 0.5
+            # Unscale before clipping
+            scaler.unscale_(optimizer)
+            
+            # Clip grad and get norm (clip_grad_norm_ returns the norm)
+            total_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0).item()
 
-            # Optimize step
-            optimizer.step()
+            # Optimizer step with scaler
+            scaler.step(optimizer)
+            scaler.update()
 
-            # Calc accuracy and F1
+            # Calc accuracy (F1 moved to validation only for performance)
             with torch.no_grad():
                 ret_pred = out["return_logits"].argmax(dim=-1)
                 act_pred = out["action_logits"].argmax(dim=-1)
@@ -170,14 +175,6 @@ def train_mgdt(
                 ret_acc = (ret_pred == rtg_bins).float().mean().item()
                 act_acc = (act_pred == actions).float().mean().item()
                 rew_acc = (rew_pred == reward_bins).float().mean().item()
-                
-                # F1 for action prediction (macro average for multi-class)
-                act_f1 = f1_score(
-                    actions.cpu().numpy().flatten(),
-                    act_pred.cpu().numpy().flatten(),
-                    average='macro',
-                    zero_division=0
-                )
 
             train_stats.append(
                 {
@@ -196,7 +193,6 @@ def train_mgdt(
                     "return_acc": ret_acc,
                     "action_acc": act_acc,
                     "reward_acc": rew_acc,
-                    "action_f1": float(act_f1),
                 }
             )
 
@@ -244,13 +240,15 @@ def _evaluate_mgdt(
 
     with torch.no_grad():
         for step, batch in enumerate(tqdm(dataloader, desc="Validation", leave=False), start=1):
-            frames = batch["frames"].to(device)
-            actions = batch["model_selected_actions"].to(device)
-            rtg_bins = batch["rtg_bins"].to(device)
-            reward_bins = batch["reward_bins"].to(device)
-            game_ids = batch["game_ids"].to(device)
+            frames = batch["frames"].to(device, non_blocking=True)
+            actions = batch["model_selected_actions"].to(device, non_blocking=True)
+            rtg_bins = batch["rtg_bins"].to(device, non_blocking=True)
+            reward_bins = batch["reward_bins"].to(device, non_blocking=True)
+            game_ids = batch["game_ids"].to(device, non_blocking=True)
 
-            out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins, game_ids)
+            # Use AMP for validation too
+            with autocast('cuda'):
+                out, loss, stats = model.forward_and_compute_loss(frames, rtg_bins, actions, reward_bins, game_ids)
 
             ret_pred = out["return_logits"].argmax(dim=-1)
             act_pred = out["action_logits"].argmax(dim=-1)

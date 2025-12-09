@@ -10,10 +10,10 @@ def run_optuna(
     *,
     n_trials: int = 20,
     lr_range: Tuple[float, float] = (1e-5, 1e-2),
-    emb_size_choices: List[int] = [64, 128, 256, 512, 1024],
+    emb_size_choices: List[int] = [64, 128, 256, 512],
     n_layers_range: Tuple[int, int] = (2, 6),
     n_heads_range: Tuple[int, int] = (1, 4),
-    num_epochs_range: Tuple[int, int] = (1, 10),
+    num_epochs_range: Tuple[int, int] = (1, 5),
 
     encoder_type: Encoder = Encoder.Patch,
 ):
@@ -39,7 +39,8 @@ def run_optuna(
             n_heads=n_heads,
             num_epochs=num_epochs,
             emb_size=emb_size,
-            encoder_type=encoder_type
+            encoder_type=encoder_type,
+            val_every_pct=1.0,  # Only validate at epoch end during tuning for speed
         )
         return main_val_stats[-1]['loss']
 
