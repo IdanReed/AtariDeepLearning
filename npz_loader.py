@@ -40,6 +40,7 @@ def _get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
 def _fix_obs_paths(
     game_to_sequences: Dict[Path, List[dict]],
     dataset_root: str | Path = "dataset",
+    is_collab: bool = False,
 ):
     """
     The data set png paths are absolute paths from Brian's C drive, so we need to make them relative
@@ -63,8 +64,12 @@ def _fix_obs_paths(
                     
                     new_obs = []
                     for s in arr:
-                        split_path = str(s).split("\\")
-                        p = Path(split_path[0]).joinpath(*split_path[1:])
+                        if is_collab:
+                            split_path = str(s).split("\\")
+                            p = Path(split_path[0]).joinpath(*split_path[1:])
+                        else:
+                            p = Path(s)
+
                         parts = p.parts
 
                         if inner_game_dir in parts:
@@ -139,14 +144,17 @@ def _build_episodes_from_sequences(
 
     return episodes
 
-
-
-def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path]) -> List[Episode]:
+def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path], is_collab: bool = False) -> List[Episode]:
     all_game_dirs = main_game_dirs + holdout_game_dirs
 
     npz_paths_by_game = _discover_game_npz_paths(all_game_dirs)
     game_to_sequences = _get_sequences_by_game(npz_paths_by_game)
-    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root="/content/dataset/dataset")
+    if is_collab:
+        dataset_root = "/content/dataset/dataset_collab"
+    else:
+        dataset_root = "dataset"
+
+    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root=dataset_root, is_collab=is_collab)
     episodes = _build_episodes_from_sequences(sequences_by_game)
 
     # Add game ids to episode
