@@ -14,7 +14,6 @@ def run_optuna(
     n_layers_range: Tuple[int, int] = (2, 6),
     n_heads_range: Tuple[int, int] = (1, 4),
     num_epochs_range: Tuple[int, int] = (1, 5),
-    max_timestep_window_size_range: Tuple[int, int] = (4, 32),
 
     encoder_type: Encoder = Encoder.Patch,
 ):
@@ -25,7 +24,6 @@ def run_optuna(
         n_layers = trial.suggest_int('n_layers', n_layers_range[0], n_layers_range[1])
         n_heads = trial.suggest_int('n_heads', n_heads_range[0], n_heads_range[1])
         num_epochs = trial.suggest_int('num_epochs', num_epochs_range[0], num_epochs_range[1])
-        max_timestep_window_size = trial.suggest_int('max_timestep_window_size', max_timestep_window_size_range[0], max_timestep_window_size_range[1])
         print("Trial params:", trial.params)
         
         # Ensure that emb_size is divisible by n_heads
@@ -41,13 +39,10 @@ def run_optuna(
             n_heads=n_heads,
             num_epochs=num_epochs,
             emb_size=emb_size,
-            encoder_type=encoder_type,
-            max_timestep_window_size=max_timestep_window_size
-
+            encoder_type=encoder_type
         )
         return main_val_stats[-1]['loss']
 
     study = optuna.create_study(direction='minimize')
     study.optimize(objective, n_trials=n_trials)
     return study
-        

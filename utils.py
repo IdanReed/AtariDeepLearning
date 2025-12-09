@@ -47,6 +47,18 @@ def save_checkpoint(
     print(f"Model and stats saved to {model_path}")
     return model_path
 
+
+def load_checkpoint(output_dir: Path) -> ModelCheckpoint:
+    output_dir = Path(output_dir)
+    model_path = output_dir / "model_checkpoint.pt"
+    
+    if not model_path.exists():
+        raise FileNotFoundError(f"No checkpoint found at {model_path}")
+    
+    checkpoint = torch.load(model_path, weights_only=False)
+    print(f"Loaded checkpoint from {model_path}")
+    return checkpoint
+
 def safe_clear_output_dir(output_dir: Path) -> None:
     if output_dir.exists():
         safe_extensions = {".png", ".pt"}

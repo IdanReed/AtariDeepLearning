@@ -6,6 +6,7 @@ from typing import Any, List, Tuple, Optional
 import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
+from sklearn.metrics import f1_score
 
 from episode import Episode
 from episode_dataset import EpisodeSliceDataset, BinningInfo
@@ -160,7 +161,7 @@ def train_mgdt(
             # Optimize step
             optimizer.step()
 
-            # Calc accuracy
+            # Calc accuracy and F1
             with torch.no_grad():
                 ret_pred = out["return_logits"].argmax(dim=-1)
                 act_pred = out["action_logits"].argmax(dim=-1)
@@ -169,6 +170,14 @@ def train_mgdt(
                 ret_acc = (ret_pred == rtg_bins).float().mean().item()
                 act_acc = (act_pred == actions).float().mean().item()
                 rew_acc = (rew_pred == reward_bins).float().mean().item()
+                
+                # F1 for action prediction (macro average for multi-class)
+                act_f1 = f1_score(
+                    actions.cpu().numpy().flatten(),
+                    act_pred.cpu().numpy().flatten(),
+                    average='macro',
+                    zero_division=0
+                )
 
             train_stats.append(
                 {
@@ -187,6 +196,7 @@ def train_mgdt(
                     "return_acc": ret_acc,
                     "action_acc": act_acc,
                     "reward_acc": rew_acc,
+                    "action_f1": float(act_f1),
                 }
             )
 
@@ -249,6 +259,14 @@ def _evaluate_mgdt(
             ret_acc = (ret_pred == rtg_bins).float().mean().item()
             act_acc = (act_pred == actions).float().mean().item()
             rew_acc = (rew_pred == reward_bins).float().mean().item()
+            
+            # F1 for action prediction (macro average for multi-class)
+            act_f1 = f1_score(
+                actions.cpu().numpy().flatten(),
+                act_pred.cpu().numpy().flatten(),
+                average='macro',
+                zero_division=0
+            )
 
             eval_stats.append({
                 "epoch": epoch,
@@ -265,6 +283,7 @@ def _evaluate_mgdt(
                 "return_acc": ret_acc,
                 "action_acc": act_acc,
                 "reward_acc": rew_acc,
+                "action_f1": float(act_f1),
             })
 
     return eval_stats

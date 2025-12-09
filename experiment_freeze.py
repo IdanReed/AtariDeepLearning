@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, Dict, List, Optional
 from episode_dataset import BinningInfo
 from epsiode_dataloader import DataLoaderBundle
 from mgdt_model import Freezeable
@@ -6,22 +6,23 @@ from mgdt_model_trainer import Encoder, train_mgdt
 from pathlib import Path
 
 def experiment_freeze(
-    experiment_name: str,
+    title_prefix: str,
     main_bundle: DataLoaderBundle, 
     holdout_bundle: DataLoaderBundle, 
     bins: BinningInfo,
     freeze_components: List[Freezeable],
     experiment_dir: Path,
-    title_prefix: str,
+    best_params: Optional[Dict[str, Any]] = None,
     ):
     
     from utils import safe_clear_output_dir
     safe_clear_output_dir(experiment_dir)
 
     # Best params
-    from optuna_tuning import run_optuna
-    study = run_optuna(main_bundle.train_loader, main_bundle.val_loader, bins)
-    best_params = study.best_params
+    if best_params is None:
+        from optuna_tuning import run_optuna
+        study = run_optuna(main_bundle.train_loader, main_bundle.val_loader, bins, num_epochs_range=(1, 1), emb_size_choices=[128], n_trials=1)
+        best_params = study.best_params
     
     # Train with best params
     model, main_train_stats, main_val_stats = train_mgdt(
@@ -54,7 +55,7 @@ def experiment_freeze(
         main_val_stats=main_val_stats, 
         holdout_train_stats=holdout_train_stats, 
         holdout_val_stats=holdout_val_stats,
-        study=study,
+        # study=study,
     )
 
     # Main plots
@@ -63,4 +64,4 @@ def experiment_freeze(
     plot_losses(holdout_train_stats, holdout_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Holdout")
     plot_holdout_comparison(main_train_stats, main_val_stats, holdout_train_stats, holdout_val_stats, output_dir=experiment_dir, title_prefix=f"{title_prefix} - Comparison")
 
-    return
+    return best_params

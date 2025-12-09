@@ -611,14 +611,212 @@ def plot_holdout_comparison(
 
 @dataclass
 class ExperimentData:
+    name: str
     main_train_stats: List[Dict[str, Any]]
     main_val_stats: List[Dict[str, Any]]
     holdout_train_stats: List[Dict[str, Any]]
     holdout_val_stats: List[Dict[str, Any]]
 
-def experiment_comparison(
-    experiment_data: List[ExperimentData],
-):
-    
 
-    return
+def _steps_to_reach_threshold(
+    stats: List[Dict[str, Any]], 
+    metric_key: str, 
+    threshold: float,
+    higher_is_better: bool = True,
+) -> Optional[int]:
+    """Find the first step where metric reaches/exceeds threshold."""
+    for s in stats:
+        val = s.get(metric_key)
+        if val is None:
+            continue
+        if higher_is_better and val >= threshold:
+            return s.get("global_step", s.get("step", 0))
+        elif not higher_is_better and val <= threshold:
+            return s.get("global_step", s.get("step", 0))
+    return None
+
+
+def experiment_comparison(
+    experiments: List[ExperimentData],
+    f1_thresholds: List[float] = [0.3, 0.4, 0.5, 0.6],
+    output_dir: Optional[Path] = None,
+    no_show: bool = False,
+) -> Dict[str, Any]:
+
+    colors = sns.color_palette("husl", len(experiments))
+    
+    processed_experiments = []
+    for exp in experiments:
+        agg_holdout_val = _aggregate_validation_stats(exp.holdout_val_stats) if exp.holdout_val_stats else []
+        agg_main_val = _aggregate_validation_stats(exp.main_val_stats) if exp.main_val_stats else []
+        processed_experiments.append({
+            "name": exp.name,
+            "holdout_train": exp.holdout_train_stats,
+            "holdout_val": agg_holdout_val,
+            "main_train": exp.main_train_stats,
+            "main_val": agg_main_val,
+        })
+    
+    # Holdout validation loss comparison
+    fig1, ax1 = plt.subplots(1, 1, figsize=(10, 6))
+    
+    for idx, exp in enumerate(processed_experiments):
+        if not exp["holdout_val"]:
+            continue
+        steps = _extract(exp["holdout_val"], "global_step")
+        loss = _extract(exp["holdout_val"], "loss")
+        ax1.plot(steps, loss, label=exp["name"], color=colors[idx], linewidth=2, marker='o', markersize=4)
+    
+    ax1.set_xlabel("Global Step")
+    ax1.set_ylabel("Validation Loss")
+    ax1.set_title("Holdout Validation Loss Comparison")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    plt.tight_layout()
+    _save_and_show(fig1, output_dir, "experiment_comparison_holdout_val_loss", no_show)
+    
+    # Holdout validation F1 comparison
+    fig2, ax2 = plt.subplots(1, 1, figsize=(10, 6))
+    
+    has_f1_data = False
+    for idx, exp in enumerate(processed_experiments):
+        if not exp["holdout_val"]:
+            continue
+        # Check if F1 data exists
+        if "action_f1" not in exp["holdout_val"][0]:
+            continue
+        has_f1_data = True
+        steps = _extract(exp["holdout_val"], "global_step")
+        f1 = _extract(exp["holdout_val"], "action_f1")
+        ax2.plot(steps, f1, label=exp["name"], color=colors[idx], linewidth=2, marker='o', markersize=4)
+    
+    if has_f1_data:
+        # Add threshold lines
+        for thresh in f1_thresholds:
+            ax2.axhline(y=thresh, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+            ax2.text(ax2.get_xlim()[1], thresh, f' F1={thresh}', va='center', fontsize=9, color='gray')
+        
+        ax2.set_xlabel("Global Step")
+        ax2.set_ylabel("Action F1 Score (macro)")
+        ax2.set_title("Holdout Validation Action F1 Comparison")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        ax2.set_ylim(0, 1)
+        plt.tight_layout()
+        _save_and_show(fig2, output_dir, "experiment_comparison_holdout_val_f1", no_show)
+    else:
+        plt.close(fig2)
+    
+    # Holdout training F1 over steps
+    fig3, ax3 = plt.subplots(1, 1, figsize=(10, 6))
+    
+    has_train_f1 = False
+    for idx, exp in enumerate(processed_experiments):
+        if not exp["holdout_train"]:
+            continue
+        if "action_f1" not in exp["holdout_train"][0]:
+            continue
+        has_train_f1 = True
+        steps = _extract(exp["holdout_train"], "global_step")
+        f1 = _extract(exp["holdout_train"], "action_f1")
+        f1_ema = _compute_ema(f1, alpha=0.9)
+        ax3.plot(steps, f1_ema, label=exp["name"], color=colors[idx], linewidth=2, alpha=0.8)
+    
+    if has_train_f1:
+        for thresh in f1_thresholds:
+            ax3.axhline(y=thresh, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        
+        ax3.set_xlabel("Global Step")
+        ax3.set_ylabel("Action F1 Score (EMA)")
+        ax3.set_title("Holdout Training Action F1 Comparison")
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        ax3.set_ylim(0, 1)
+        plt.tight_layout()
+        _save_and_show(fig3, output_dir, "experiment_comparison_holdout_train_f1", no_show)
+    else:
+        plt.close(fig3)
+    
+    # F1 steps to reach thresholds
+    steps_to_threshold: Dict[str, Dict[float, Optional[int]]] = {}
+    
+    for exp in processed_experiments:
+        exp_name = exp["name"]
+        steps_to_threshold[exp_name] = {}
+        
+        stats_to_use = exp["holdout_train"] if exp["holdout_train"] else []
+        
+        for thresh in f1_thresholds:
+            if stats_to_use and "action_f1" in stats_to_use[0]:
+                steps = _steps_to_reach_threshold(stats_to_use, "action_f1", thresh, higher_is_better=True)
+            else:
+                steps = None
+            steps_to_threshold[exp_name][thresh] = steps
+    
+    # F1
+    if has_train_f1:
+        fig4, ax4 = plt.subplots(1, 1, figsize=(12, 6))
+        
+        x = np.arange(len(f1_thresholds))
+        width = 0.8 / len(experiments)
+        
+        for idx, exp in enumerate(processed_experiments):
+            exp_name = exp["name"]
+            values = []
+            for thresh in f1_thresholds:
+                steps = steps_to_threshold[exp_name].get(thresh)
+                values.append(steps if steps is not None else 0)
+            
+            offset = (idx - len(experiments) / 2 + 0.5) * width
+            bars = ax4.bar(x + offset, values, width, label=exp_name, color=colors[idx])
+            
+            # Add "N/A" label for experiments that didn't reach threshold
+            for i, (v, thresh) in enumerate(zip(values, f1_thresholds)):
+                if steps_to_threshold[exp_name].get(thresh) is None:
+                    ax4.text(x[i] + offset, 1, 'N/A', ha='center', va='bottom', fontsize=8, rotation=90)
+        
+        ax4.set_xlabel("F1 Threshold")
+        ax4.set_ylabel("Steps to Reach Threshold")
+        ax4.set_title("Steps to Reach Action F1 Thresholds (Holdout Training)")
+        ax4.set_xticks(x)
+        ax4.set_xticklabels([f'F1 ≥ {t}' for t in f1_thresholds])
+        ax4.legend()
+        ax4.grid(True, alpha=0.3, axis='y')
+        plt.tight_layout()
+        _save_and_show(fig4, output_dir, "experiment_comparison_steps_to_f1", no_show)
+    
+    # Print summary
+    print("\n" + "=" * 70)
+    print("EXPERIMENT COMPARISON SUMMARY")
+    print("=" * 70)
+    
+    for exp in processed_experiments:
+        exp_name = exp["name"]
+        print(f"\n{exp_name}:")
+        print("-" * 40)
+        
+        if exp["holdout_train"]:
+            final_step = exp["holdout_train"][-1].get("global_step", len(exp["holdout_train"]))
+            print(f"  Total holdout training steps: {final_step}")
+        
+        if exp["holdout_val"]:
+            final_loss = exp["holdout_val"][-1].get("loss", float('nan'))
+            print(f"  Final holdout val loss: {final_loss:.4f}")
+            if "action_f1" in exp["holdout_val"][-1]:
+                final_f1 = exp["holdout_val"][-1].get("action_f1", float('nan'))
+                print(f"  Final holdout val F1: {final_f1:.4f}")
+        
+        if has_train_f1:
+            print(f"  Steps to reach F1 thresholds:")
+            for thresh in f1_thresholds:
+                steps = steps_to_threshold[exp_name].get(thresh)
+                if steps is not None:
+                    print(f"    F1 ≥ {thresh}: {steps} steps")
+                else:
+                    print(f"    F1 ≥ {thresh}: not reached")
+    
+    print("\n" + "=" * 70)
+    
+    return {
+        "steps_to_f1_threshold": steps_to_threshold,
+    }
