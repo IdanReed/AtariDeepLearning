@@ -40,10 +40,10 @@ def _get_sequences_by_game(game_npz_paths: Dict[str, List[Path]]):
 def _fix_obs_paths(
     game_to_sequences: Dict[Path, List[dict]],
     dataset_root: str | Path = "dataset",
-    is_collab: bool = False,
 ):
     """
-    The data set png paths are absolute paths from Brian's C drive, so we need to make them relative
+    The data set png paths are absolute paths from Brian's C drive, so we need to make them relative.
+    This function normalizes paths to work cross-platform (Windows, Linux, Colab, vast.ai).
     """
     dataset_root = Path(dataset_root)
     fixed: Dict[Path, List[dict]] = {}
@@ -64,19 +64,15 @@ def _fix_obs_paths(
                     
                     new_obs = []
                     for s in arr:
-                        if is_collab:
-                            split_path = str(s).split("\\")
-                            p = Path(split_path[0]).joinpath(*split_path[1:])
-                        else:
-                            p = Path(s)
-
-                        parts = p.parts
+                        # Handle both Windows backslashes and Unix forward slashes
+                        path_str = str(s).replace("\\", "/")
+                        parts = path_str.split("/")
 
                         if inner_game_dir in parts:
                             idx = parts.index(inner_game_dir)
-                            rest = Path(*parts[idx + 1 :])
+                            rest = "/".join(parts[idx + 1:])
                         else:
-                            rest = Path(*parts[-2:])
+                            rest = "/".join(parts[-2:])
 
                         new_path = dataset_root / top_game_dir / inner_game_dir / rest
                         new_obs.append(str(new_path))
@@ -144,17 +140,26 @@ def _build_episodes_from_sequences(
 
     return episodes
 
-def load_episodes(main_game_dirs: List[Path], holdout_game_dirs: List[Path], is_collab: bool = False) -> List[Episode]:
+def load_episodes(
+    main_game_dirs: List[Path], 
+    holdout_game_dirs: List[Path], 
+    dataset_root: str | Path = "dataset",
+) -> List[Episode]:
+    """
+    Load episodes from NPZ files.
+    
+    Args:
+        main_game_dirs: Paths to main game directories
+        holdout_game_dirs: Paths to holdout game directories
+        dataset_root: Root directory where dataset is located.
+                      Default "dataset" for local, use "/workspace/dataset" for vast.ai
+    """
     all_game_dirs = main_game_dirs + holdout_game_dirs
 
     npz_paths_by_game = _discover_game_npz_paths(all_game_dirs)
     game_to_sequences = _get_sequences_by_game(npz_paths_by_game)
-    if is_collab:
-        dataset_root = "/content/dataset/dataset/"
-    else:
-        dataset_root = "dataset"
 
-    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root=dataset_root, is_collab=is_collab)
+    sequences_by_game = _fix_obs_paths(game_to_sequences, dataset_root=dataset_root)
     episodes = _build_episodes_from_sequences(sequences_by_game)
 
     # Add game ids to episode

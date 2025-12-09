@@ -1,0 +1,39 @@
+# Linux-compatible requirements for vast.ai deployment
+# Core ML
+torch==2.3.0
+torchvision==0.18.0
+numpy==2.0.0
+scipy==1.13.1
+scikit-learn>=1.4.0
+
+# Data processing
+pillow>=10.0.0
+tqdm>=4.66.0
+
+# Plotting
+matplotlib>=3.8.0
+contourpy>=1.2.0
+cycler>=0.12.0
+fonttools>=4.50.0
+kiwisolver>=1.4.0
+pyparsing>=3.1.0
+
+# Hyperparameter tuning
+optuna>=3.6.0
+
+# Utilities
+pyyaml>=6.0.0
+requests>=2.31.0
+filelock>=3.13.0
+fsspec>=2024.2.0
+packaging>=24.0
+typing-extensions>=4.10.0
+
+# Networking/async (for orchestration)
+urllib3>=2.2.0
+
+# For running notebooks (optional, can be removed for pure script execution)
+# ipykernel>=6.29.0
+# jupyter-client>=8.6.0
+# jupyter-core>=5.7.0
+
