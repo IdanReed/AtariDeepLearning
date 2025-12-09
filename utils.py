@@ -14,8 +14,7 @@ class ModelCheckpoint:
     main_val_stats: List[Dict[str, Any]]
     holdout_train_stats: List[Dict[str, Any]]
     holdout_val_stats: List[Dict[str, Any]]
-    
-    study: Optional[optuna.Study] = None,
+    params: Optional[Dict[str, Any]] = None,
 
 def save_checkpoint(
     output_dir: Path,
@@ -25,7 +24,7 @@ def save_checkpoint(
     main_val_stats: List[Dict[str, Any]],
     holdout_train_stats: List[Dict[str, Any]],
     holdout_val_stats: List[Dict[str, Any]],
-    study: Optional[optuna.Study] = None,
+    params: Optional[Dict[str, Any]] = None,
 ) -> Path:
 
     output_dir = Path(output_dir)
@@ -37,7 +36,7 @@ def save_checkpoint(
         main_val_stats=main_val_stats,
         holdout_train_stats=holdout_train_stats,
         holdout_val_stats=holdout_val_stats,
-        study=study,
+        params=params,
     )
 
     # No timestamp so we only save the latest checkpoint

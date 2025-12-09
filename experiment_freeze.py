@@ -55,7 +55,7 @@ def experiment_freeze(
         main_val_stats=main_val_stats, 
         holdout_train_stats=holdout_train_stats, 
         holdout_val_stats=holdout_val_stats,
-        # study=study,
+        params=best_params,
     )
 
     # Main plots
