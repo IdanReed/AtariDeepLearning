@@ -1,22 +1,31 @@
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
-from typing import List, Dict, Any, TypeVar
+from typing import List, Dict, Any, Optional, TypeVar
 import random
 
+import optuna
 import torch
 
 @dataclass
 class ModelCheckpoint:
     model: torch.nn.Module
-    train_stats: List[Dict[str, Any]]
-    val_stats: List[Dict[str, Any]]
+    main_train_stats: List[Dict[str, Any]]
+    main_val_stats: List[Dict[str, Any]]
+    holdout_train_stats: List[Dict[str, Any]]
+    holdout_val_stats: List[Dict[str, Any]]
+    
+    study: Optional[optuna.Study] = None,
 
 def save_checkpoint(
+    output_dir: Path,
+    *,
     model: torch.nn.Module,
-    train_stats: List[Dict[str, Any]],
-    val_stats: List[Dict[str, Any]],
-    output_dir: Path = Path("output"),
+    main_train_stats: List[Dict[str, Any]],
+    main_val_stats: List[Dict[str, Any]],
+    holdout_train_stats: List[Dict[str, Any]],
+    holdout_val_stats: List[Dict[str, Any]],
+    study: Optional[optuna.Study] = None,
 ) -> Path:
 
     output_dir = Path(output_dir)
@@ -24,15 +33,15 @@ def save_checkpoint(
     
     checkpoint = ModelCheckpoint(
         model=model,
-        train_stats=train_stats,
-        val_stats=val_stats,
+        main_train_stats=main_train_stats,
+        main_val_stats=main_val_stats,
+        holdout_train_stats=holdout_train_stats,
+        holdout_val_stats=holdout_val_stats,
+        study=study,
     )
 
-    # For now just lets overwrite, idk if we want to keep all checkpoints
-    
-    # timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
-    # model_path = output_dir / f"model_{timestamp}.pt"
-    model_path = output_dir / f"model.pt"
+    # No timestamp so we only save the latest checkpoint
+    model_path = output_dir / f"model_checkpoint.pt"
 
     torch.save(checkpoint, model_path)
     print(f"Model and stats saved to {model_path}")

@@ -68,8 +68,6 @@ class MGDTModel(nn.Module):
         self.reward_embed = nn.Embedding(n_reward_bins, emb_size)
         self.game_embed = nn.Embedding(n_games, emb_size)
 
-
-
         # positional + type embeddings
         self.pos_embed = nn.Embedding(self.max_seq_len, emb_size)
         self.type_embed = nn.Embedding(4, emb_size)  # obs/return/action/reward

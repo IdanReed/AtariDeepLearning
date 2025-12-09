@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
 
@@ -11,14 +12,17 @@ sns.set_style("whitegrid")
 sns.set_palette("husl")
 
 
-def _save_and_show(fig: plt.Figure, output_dir: Optional[Path], filename: str) -> None:
+def _save_and_show(fig: plt.Figure, output_dir: Optional[Path], filename: str, no_show: bool = False) -> None:
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         filepath = output_dir / f"{filename}.png"
         fig.savefig(filepath, dpi=150, bbox_inches='tight')
         print(f"Saved plot to {filepath}")
-    plt.show()
+    if not no_show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def _extract(stats: List[Dict[str, Any]], key: str) -> np.ndarray:
@@ -184,6 +188,7 @@ def _plot_per_head_losses(
     title_prefix: str,
     epoch_boundaries: Optional[List[int]] = None,
     output_dir: Optional[Path] = None,
+    no_show: bool = False,
 ) -> None:
     """Create 2x2 subplot grid showing per-head losses."""
     colors = sns.color_palette("husl", 4)
@@ -218,7 +223,7 @@ def _plot_per_head_losses(
     
     plt.tight_layout()
     safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
-    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_per_head")
+    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_per_head", no_show)
 
 
 def _plot_combined_losses(
@@ -230,6 +235,7 @@ def _plot_combined_losses(
     title_prefix: str,
     epoch_boundaries: Optional[List[int]] = None,
     output_dir: Optional[Path] = None,
+    no_show: bool = False,
 ) -> None:
     """Create a single plot showing all losses together."""
     colors = sns.color_palette("husl", 4)
@@ -294,7 +300,7 @@ def _plot_combined_losses(
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     safe_prefix = title_prefix.replace(" ", "_").replace("/", "_").lower() if title_prefix else "train"
-    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_combined")
+    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_combined", no_show)
 
 
 def _plot_ema_losses(
@@ -307,6 +313,7 @@ def _plot_ema_losses(
     epoch_boundaries: Optional[List[int]] = None,
     alpha: float = 0.99,
     output_dir: Optional[Path] = None,
+    no_show: bool = False,
 ) -> None:
     colors = sns.color_palette("husl", 4)
     loss_configs = [
@@ -348,7 +355,7 @@ def _plot_ema_losses(
         )
     
     plt.tight_layout()
-    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_ema_per_head")
+    _save_and_show(fig, output_dir, f"model_{safe_prefix}_losses_ema_per_head", no_show)
     
     # Combined EMA plot
     fig2, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -402,7 +409,7 @@ def _plot_ema_losses(
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    _save_and_show(fig2, output_dir, f"model_{safe_prefix}_losses_ema_combined")
+    _save_and_show(fig2, output_dir, f"model_{safe_prefix}_losses_ema_combined", no_show)
 
 
 def plot_losses(
@@ -411,6 +418,7 @@ def plot_losses(
     title_prefix: str = "",
     aggregate_validation: bool = True,
     output_dir: Optional[Path] = None,
+    no_show: bool = False,
 ) -> None:
     if not train_stats:
         raise ValueError("train_stats is empty")
@@ -429,15 +437,15 @@ def plot_losses(
     
     _plot_per_head_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch, 
-        title_prefix, epoch_boundaries, output_dir
+        title_prefix, epoch_boundaries, output_dir, no_show
     )
     _plot_combined_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch,
-        title_prefix, epoch_boundaries, output_dir
+        title_prefix, epoch_boundaries, output_dir, no_show
     )
     _plot_ema_losses(
         train_steps, train_losses, val_steps, val_losses, val_is_mid_epoch,
-        title_prefix, epoch_boundaries, output_dir=output_dir
+        title_prefix, epoch_boundaries, output_dir=output_dir, no_show=no_show
     )
 
 
@@ -450,6 +458,7 @@ def plot_holdout_comparison(
     aggregate_validation: bool = True,
     ema_alpha: float = 0.9,
     output_dir: Optional[Path] = None,
+    no_show: bool = False,
 ) -> None:
     if not main_train_stats:
         raise ValueError("main_train_stats is empty")
@@ -520,7 +529,7 @@ def plot_holdout_comparison(
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    _save_and_show(fig, output_dir, f"comparison_{safe_prefix}_main_vs_holdout")
+    _save_and_show(fig, output_dir, f"comparison_{safe_prefix}_main_vs_holdout", no_show)
     
     # Plot 2: Per-head loss comparison
     loss_keys = ["loss_return", "loss_action", "loss_reward"]
@@ -546,7 +555,7 @@ def plot_holdout_comparison(
         ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    _save_and_show(fig2, output_dir, f"comparison_{safe_prefix}_per_head_loss")
+    _save_and_show(fig2, output_dir, f"comparison_{safe_prefix}_per_head_loss", no_show)
     
     # Plot 3: Accuracy comparison
     acc_keys = ["return_acc", "action_acc", "reward_acc"]
@@ -572,7 +581,7 @@ def plot_holdout_comparison(
         ax.set_ylim(0, 1)
     
     plt.tight_layout()
-    _save_and_show(fig3, output_dir, f"comparison_{safe_prefix}_accuracy")
+    _save_and_show(fig3, output_dir, f"comparison_{safe_prefix}_accuracy", no_show)
     
     # Print summary statistics
     print("\n" + "="*60)
@@ -599,3 +608,17 @@ def plot_holdout_comparison(
     else:
         print(f"\nHoldout did not reach main's final loss of {main_final:.4f}")
     print("="*60)
+
+@dataclass
+class ExperimentData:
+    main_train_stats: List[Dict[str, Any]]
+    main_val_stats: List[Dict[str, Any]]
+    holdout_train_stats: List[Dict[str, Any]]
+    holdout_val_stats: List[Dict[str, Any]]
+
+def experiment_comparison(
+    experiment_data: List[ExperimentData],
+):
+    
+
+    return

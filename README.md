@@ -18,3 +18,5 @@ https://storage.googleapis.com/atari_dataset_rehost/dataset.zip
 Extract into root level of this repo:
 - ./dataset/gamename/gamename/gamename-images-seq
 - ./dataset/gamename/gamename/gamename-seq.npz
+
+# Va
