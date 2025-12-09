@@ -109,7 +109,7 @@ class CNNEncoder(ObsEncoder):
             _, _, Hp, Wp = feats.shape
             self.num_tokens_per_frame = Hp * Wp
 
-    def forward(self, frames: torch.Tensor) -> torch.Tensor:
+    def forward(self, frames: torch.Tensor) -> torch.Tensor:    
         """
         frames: (batch_size, n_timesteps, n_channels, img_height, img_width)
         returns: (batch_size, n_timesteps, n_tokens_per_frame, emb_size)

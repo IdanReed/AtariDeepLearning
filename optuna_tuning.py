@@ -13,7 +13,7 @@ def run_optuna(
     emb_size_choices: List[int] = [64, 128, 256, 512, 1024],
     n_layers_range: Tuple[int, int] = (2, 6),
     n_heads_range: Tuple[int, int] = (1, 4),
-    num_epochs_range: Tuple[int, int] = (1, 5),
+    num_epochs_range: Tuple[int, int] = (1, 10),
 
     encoder_type: Encoder = Encoder.Patch,
 ):

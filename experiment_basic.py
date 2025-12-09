@@ -1,17 +1,16 @@
 from typing import Any, Dict, List, Optional
 from episode_dataset import BinningInfo
 from epsiode_dataloader import DataLoaderBundle
-from mgdt_model import Freezeable
 from mgdt_model_trainer import Encoder, train_mgdt
 from pathlib import Path
 
-def run_experiment_freeze(
+def run_experiment_basic(
     title_prefix: str,
     main_bundle: DataLoaderBundle, 
     holdout_bundle: DataLoaderBundle, 
     bins: BinningInfo,
-    freeze_components: List[Freezeable],
     experiment_dir: Path,
+    encoder_type: Encoder,
     best_params: Optional[Dict[str, Any]] = None,
     ):
     
@@ -21,7 +20,7 @@ def run_experiment_freeze(
     # Best params
     if best_params is None:
         from optuna_tuning import run_optuna
-        study = run_optuna(main_bundle.train_loader, main_bundle.val_loader, bins, num_epochs_range=(1, 1), emb_size_choices=[128], n_trials=1)
+        study = run_optuna(main_bundle.train_loader, main_bundle.val_loader, bins, encoder_type=encoder_type)
         best_params = study.best_params
     
     # Train with best params
@@ -29,13 +28,9 @@ def run_experiment_freeze(
         bins=bins,
         dataloader_train=main_bundle.train_loader,
         dataloader_val=main_bundle.val_loader,
-        encoder_type=Encoder.Patch,
+        encoder_type=encoder_type,
         **best_params,
     )
-
-    # Freeze
-    from mgdt_model import Freezeable
-    model.freeze(components=freeze_components)
 
     # Train holdout
     model, holdout_train_stats, holdout_val_stats = train_mgdt(
