@@ -122,6 +122,13 @@ def _aggregate_validation_stats(val_stats: List[Dict[str, Any]]) -> List[Dict[st
             "action_acc": float(np.mean([s["action_acc"] for s in batch_stats])),
             "reward_acc": float(np.mean([s["reward_acc"] for s in batch_stats])),
         }
+        # Include F1 scores if present (only computed during validation)
+        if "action_f1" in batch_stats[0]:
+            agg["action_f1"] = float(np.mean([s["action_f1"] for s in batch_stats]))
+        if "return_f1" in batch_stats[0]:
+            agg["return_f1"] = float(np.mean([s["return_f1"] for s in batch_stats]))
+        if "reward_f1" in batch_stats[0]:
+            agg["reward_f1"] = float(np.mean([s["reward_f1"] for s in batch_stats]))
         aggregated.append(agg)
     
     return aggregated
@@ -694,7 +701,6 @@ def experiment_comparison(
         # Add threshold lines
         for thresh in f1_thresholds:
             ax2.axhline(y=thresh, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-            ax2.text(ax2.get_xlim()[1], thresh, f' F1={thresh}', va='center', fontsize=9, color='gray')
         
         ax2.set_xlabel("Global Step")
         ax2.set_ylabel("Action F1 Score (macro)")
@@ -707,54 +713,131 @@ def experiment_comparison(
     else:
         plt.close(fig2)
     
-    # Holdout training F1 over steps
-    fig3, ax3 = plt.subplots(1, 1, figsize=(10, 6))
-    
-    has_train_f1 = False
-    for idx, exp in enumerate(processed_experiments):
-        if not exp["holdout_train"]:
-            continue
-        if "action_f1" not in exp["holdout_train"][0]:
-            continue
-        has_train_f1 = True
-        steps = _extract(exp["holdout_train"], "global_step")
-        f1 = _extract(exp["holdout_train"], "action_f1")
-        f1_ema = _compute_ema(f1, alpha=0.9)
-        ax3.plot(steps, f1_ema, label=exp["name"], color=colors[idx], linewidth=2, alpha=0.8)
-    
-    if has_train_f1:
-        for thresh in f1_thresholds:
-            ax3.axhline(y=thresh, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-        
-        ax3.set_xlabel("Global Step")
-        ax3.set_ylabel("Action F1 Score (EMA)")
-        ax3.set_title("Holdout Training Action F1 Comparison")
-        ax3.legend()
-        ax3.grid(True, alpha=0.3)
-        ax3.set_ylim(0, 1)
-        plt.tight_layout()
-        _save_and_show(fig3, output_dir, "experiment_comparison_holdout_train_f1", no_show)
-    else:
-        plt.close(fig3)
-    
-    # F1 steps to reach thresholds
-    steps_to_threshold: Dict[str, Dict[float, Optional[int]]] = {}
+    # F1 steps to reach thresholds (using validation data since F1 is only computed during eval)
+    steps_to_f1_threshold: Dict[str, Dict[float, Optional[int]]] = {}
     
     for exp in processed_experiments:
         exp_name = exp["name"]
-        steps_to_threshold[exp_name] = {}
+        steps_to_f1_threshold[exp_name] = {}
         
-        stats_to_use = exp["holdout_train"] if exp["holdout_train"] else []
+        # Use validation stats for F1 since it's only computed during eval
+        stats_to_use = exp["holdout_val"] if exp["holdout_val"] else []
         
         for thresh in f1_thresholds:
             if stats_to_use and "action_f1" in stats_to_use[0]:
                 steps = _steps_to_reach_threshold(stats_to_use, "action_f1", thresh, higher_is_better=True)
             else:
                 steps = None
-            steps_to_threshold[exp_name][thresh] = steps
+            steps_to_f1_threshold[exp_name][thresh] = steps
     
-    # F1
-    if has_train_f1:
+    # Holdout validation accuracy comparison
+    fig_acc_val, ax_acc_val = plt.subplots(1, 1, figsize=(10, 6))
+    
+    has_acc_data = False
+    for idx, exp in enumerate(processed_experiments):
+        if not exp["holdout_val"]:
+            continue
+        if "action_acc" not in exp["holdout_val"][0]:
+            continue
+        has_acc_data = True
+        steps = _extract(exp["holdout_val"], "global_step")
+        acc = _extract(exp["holdout_val"], "action_acc")
+        ax_acc_val.plot(steps, acc, label=exp["name"], color=colors[idx], linewidth=2, marker='o', markersize=4)
+    
+    if has_acc_data:
+        # Add threshold lines for accuracy
+        acc_thresholds = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+        for thresh in acc_thresholds:
+            ax_acc_val.axhline(y=thresh, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        
+        ax_acc_val.set_xlabel("Global Step")
+        ax_acc_val.set_ylabel("Action Accuracy")
+        ax_acc_val.set_title("Holdout Validation Action Accuracy Comparison")
+        ax_acc_val.legend()
+        ax_acc_val.grid(True, alpha=0.3)
+        ax_acc_val.set_ylim(0, 1)
+        plt.tight_layout()
+        _save_and_show(fig_acc_val, output_dir, "experiment_comparison_holdout_val_acc", no_show)
+    else:
+        plt.close(fig_acc_val)
+    
+    # Holdout training accuracy over steps
+    fig_acc_train, ax_acc_train = plt.subplots(1, 1, figsize=(10, 6))
+    
+    has_train_acc = False
+    for idx, exp in enumerate(processed_experiments):
+        if not exp["holdout_train"]:
+            continue
+        if "action_acc" not in exp["holdout_train"][0]:
+            continue
+        has_train_acc = True
+        steps = _extract(exp["holdout_train"], "global_step")
+        acc = _extract(exp["holdout_train"], "action_acc")
+        acc_ema = _compute_ema(acc, alpha=0.9)
+        ax_acc_train.plot(steps, acc_ema, label=exp["name"], color=colors[idx], linewidth=2, alpha=0.8)
+    
+    if has_train_acc:
+        acc_thresholds = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+        for thresh in acc_thresholds:
+            ax_acc_train.axhline(y=thresh, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+        
+        ax_acc_train.set_xlabel("Global Step")
+        ax_acc_train.set_ylabel("Action Accuracy (EMA)")
+        ax_acc_train.set_title("Holdout Training Action Accuracy Comparison")
+        ax_acc_train.legend()
+        ax_acc_train.grid(True, alpha=0.3)
+        ax_acc_train.set_ylim(0, 1)
+        plt.tight_layout()
+        _save_and_show(fig_acc_train, output_dir, "experiment_comparison_holdout_train_acc", no_show)
+    else:
+        plt.close(fig_acc_train)
+    
+    # Accuracy steps to reach thresholds
+    acc_thresholds_for_steps = [0.3, 0.4, 0.5, 0.6, 0.7]
+    steps_to_acc_threshold: Dict[str, Dict[float, Optional[int]]] = {}
+    
+    for exp in processed_experiments:
+        exp_name = exp["name"]
+        steps_to_acc_threshold[exp_name] = {}
+        
+        stats_to_use = exp["holdout_train"] if exp["holdout_train"] else []
+        
+        for thresh in acc_thresholds_for_steps:
+            if stats_to_use and "action_acc" in stats_to_use[0]:
+                steps = _steps_to_reach_threshold(stats_to_use, "action_acc", thresh, higher_is_better=True)
+            else:
+                steps = None
+            steps_to_acc_threshold[exp_name][thresh] = steps
+    
+    # Steps to accuracy threshold bar chart
+    if has_train_acc:
+        fig_acc_steps, ax_acc_steps = plt.subplots(1, 1, figsize=(12, 6))
+        
+        x = np.arange(len(acc_thresholds_for_steps))
+        width = 0.8 / len(experiments)
+        
+        for idx, exp in enumerate(processed_experiments):
+            exp_name = exp["name"]
+            values = []
+            for thresh in acc_thresholds_for_steps:
+                steps = steps_to_acc_threshold[exp_name].get(thresh)
+                values.append(steps if steps is not None else 0)
+            
+            offset = (idx - len(experiments) / 2 + 0.5) * width
+            ax_acc_steps.bar(x + offset, values, width, label=exp_name, color=colors[idx])
+        
+        ax_acc_steps.set_xlabel("Accuracy Threshold")
+        ax_acc_steps.set_ylabel("Steps to Reach Threshold")
+        ax_acc_steps.set_title("Steps to Reach Action Accuracy Thresholds (Holdout Training)")
+        ax_acc_steps.set_xticks(x)
+        ax_acc_steps.set_xticklabels([f'Acc >= {t}' for t in acc_thresholds_for_steps])
+        ax_acc_steps.legend()
+        ax_acc_steps.grid(True, alpha=0.3, axis='y')
+        plt.tight_layout()
+        _save_and_show(fig_acc_steps, output_dir, "experiment_comparison_steps_to_acc", no_show)
+    
+    # F1 steps to threshold bar chart (using validation F1)
+    if has_f1_data:
         fig4, ax4 = plt.subplots(1, 1, figsize=(12, 6))
         
         x = np.arange(len(f1_thresholds))
@@ -764,22 +847,17 @@ def experiment_comparison(
             exp_name = exp["name"]
             values = []
             for thresh in f1_thresholds:
-                steps = steps_to_threshold[exp_name].get(thresh)
+                steps = steps_to_f1_threshold[exp_name].get(thresh)
                 values.append(steps if steps is not None else 0)
             
             offset = (idx - len(experiments) / 2 + 0.5) * width
-            bars = ax4.bar(x + offset, values, width, label=exp_name, color=colors[idx])
-            
-            # Add "N/A" label for experiments that didn't reach threshold
-            for i, (v, thresh) in enumerate(zip(values, f1_thresholds)):
-                if steps_to_threshold[exp_name].get(thresh) is None:
-                    ax4.text(x[i] + offset, 1, 'N/A', ha='center', va='bottom', fontsize=8, rotation=90)
+            ax4.bar(x + offset, values, width, label=exp_name, color=colors[idx])
         
         ax4.set_xlabel("F1 Threshold")
         ax4.set_ylabel("Steps to Reach Threshold")
-        ax4.set_title("Steps to Reach Action F1 Thresholds (Holdout Training)")
+        ax4.set_title("Steps to Reach Action F1 Thresholds (Holdout Validation)")
         ax4.set_xticks(x)
-        ax4.set_xticklabels([f'F1 ≥ {t}' for t in f1_thresholds])
+        ax4.set_xticklabels([f'F1 >= {t}' for t in f1_thresholds])
         ax4.legend()
         ax4.grid(True, alpha=0.3, axis='y')
         plt.tight_layout()
@@ -805,18 +883,31 @@ def experiment_comparison(
             if "action_f1" in exp["holdout_val"][-1]:
                 final_f1 = exp["holdout_val"][-1].get("action_f1", float('nan'))
                 print(f"  Final holdout val F1: {final_f1:.4f}")
+            if "action_acc" in exp["holdout_val"][-1]:
+                final_acc = exp["holdout_val"][-1].get("action_acc", float('nan'))
+                print(f"  Final holdout val accuracy: {final_acc:.4f}")
         
-        if has_train_f1:
-            print(f"  Steps to reach F1 thresholds:")
+        if has_f1_data:
+            print(f"  Steps to reach F1 thresholds (validation):")
             for thresh in f1_thresholds:
-                steps = steps_to_threshold[exp_name].get(thresh)
+                steps = steps_to_f1_threshold[exp_name].get(thresh)
                 if steps is not None:
-                    print(f"    F1 ≥ {thresh}: {steps} steps")
+                    print(f"    F1 >= {thresh}: {steps} steps")
                 else:
-                    print(f"    F1 ≥ {thresh}: not reached")
+                    print(f"    F1 >= {thresh}: not reached")
+        
+        if has_train_acc:
+            print(f"  Steps to reach accuracy thresholds:")
+            for thresh in acc_thresholds_for_steps:
+                steps = steps_to_acc_threshold[exp_name].get(thresh)
+                if steps is not None:
+                    print(f"    Acc >= {thresh}: {steps} steps")
+                else:
+                    print(f"    Acc >= {thresh}: not reached")
     
     print("\n" + "=" * 70)
     
     return {
-        "steps_to_f1_threshold": steps_to_threshold,
+        "steps_to_f1_threshold": steps_to_f1_threshold,
+        "steps_to_acc_threshold": steps_to_acc_threshold,
     }
