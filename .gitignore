@@ -1,7 +1,6 @@
 dataset
 *.zip
-!model_best_parameter_output
-!model_best_parameter_output/**/*.png
+*.png
 diagnostics/
 
 # Byte-compiled / optimized / DLL files
