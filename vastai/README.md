@@ -29,7 +29,29 @@ Verify it works:
 vastai show user
 ```
 
-### 3. Update the config
+### 3. Set up SSH key (required for running experiments)
+
+Generate an SSH key if you don't have one:
+```bash
+ssh-keygen -t ed25519 -C "your_email@example.com"
+```
+
+Add your public key to vast.ai:
+```bash
+vastai create ssh-key "$(cat ~/.ssh/id_ed25519.pub)"
+```
+
+Or on Windows (PowerShell):
+```powershell
+vastai create ssh-key (Get-Content ~/.ssh/id_ed25519.pub)
+```
+
+Verify it was added:
+```bash
+vastai show ssh-keys
+```
+
+### 4. Update the config
 
 Edit `vastai/config.yaml`:
 

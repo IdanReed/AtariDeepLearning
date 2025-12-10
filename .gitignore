@@ -1,6 +1,6 @@
 dataset
 *.zip
-*.png
+.png
 diagnostics/
 
 # Byte-compiled / optimized / DLL files

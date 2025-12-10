@@ -9,7 +9,7 @@ import torch
 
 @dataclass
 class ModelCheckpoint:
-    model: torch.nn.Module
+    model_state_dict: Dict[str, Any]  # Save state_dict instead of full model to avoid pickling issues
     main_train_stats: List[Dict[str, Any]]
     main_val_stats: List[Dict[str, Any]]
     holdout_train_stats: List[Dict[str, Any]]
@@ -30,8 +30,9 @@ def save_checkpoint(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Save state_dict instead of full model to avoid pickling issues with local functions
     checkpoint = ModelCheckpoint(
-        model=model,
+        model_state_dict=model.state_dict(),
         main_train_stats=main_train_stats,
         main_val_stats=main_val_stats,
         holdout_train_stats=holdout_train_stats,

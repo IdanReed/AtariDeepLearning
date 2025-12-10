@@ -4,13 +4,11 @@
 # GCS dataset URL - update this to your actual bucket URL
 # For public buckets, use https:// format
 # For private buckets, use gs:// format (requires gsutil auth)
-gcs_dataset_url: "https://storage.googleapis.com/your-bucket-name/dataset.zip"
+gcs_dataset_url: "https://storage.googleapis.com/atari_dataset_rehost/dataset.zip"
 
 # GPU configuration
 gpu_types:
-  - "A100"
   - "A100_SXM4"
-  - "A100_PCIE"
 
 # Minimum GPU RAM in GB
 min_gpu_ram_gb: 16.0
@@ -21,38 +19,23 @@ max_price_per_hour: 1.50
 # Disk space in GB (dataset is ~10GB + model checkpoints + code)
 disk_space_gb: 50
 
-# Docker image to use
-# PyTorch with CUDA 12.1 for compatibility
 docker_image: "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 
-# Experiments to run
-# Each name corresponds to a vast_experiment_<name>.py file
 experiments:
-  # Quick test (10% dataset, 1 epoch) - run first to verify setup
-  - vast_experiment_test
+  # - vast_experiment_test
   
-  # Freezing experiments (use pre-tuned baseline params)
   # - vast_experiment_freeze_transformer
   # - vast_experiment_freeze_obs_encoder
   
-  # Encoder type experiments (require optuna tuning)
-  # - vast_experiment_cnn
+  - vast_experiment_cnn
   # - vast_experiment_patch
   
-  # Window size experiments (require optuna tuning)
-  # - vast_experiment_window_8
-  # - vast_experiment_window_16
-  # - vast_experiment_window_32
+  - vast_experiment_window_8
+  - vast_experiment_window_16
+  - vast_experiment_window_32
 
-
-# Advanced settings
-# ==================
-
-# Maximum concurrent experiments (limited by budget/availability)
 # max_concurrent: 5
-
 # SSH timeout in seconds
 # ssh_timeout: 60
-
 # Instance startup timeout in seconds  
 # startup_timeout: 600

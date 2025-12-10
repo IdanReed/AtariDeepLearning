@@ -88,16 +88,20 @@ class ParallelExperimentRunner:
             self._log(f"[{experiment_name}] Waiting for instance {instance_id} to be ready...")
             self.orchestrator.wait_for_instance_ready(instance_id, timeout=600)
             
-            # Step 3: Upload project files
+            # Step 3: Wait for onstart script to complete (dataset download)
+            self._log(f"[{experiment_name}] Waiting for dataset download...")
+            self.orchestrator.wait_for_onstart_complete(instance_id, timeout=900)
+            
+            # Step 4: Upload project files
             self._log(f"[{experiment_name}] Uploading project files...")
             self.orchestrator.upload_project(instance_id)
             
-            # Step 4: Run experiment
+            # Step 5: Run experiment
             self._log(f"[{experiment_name}] Starting experiment...")
             run.status = "running"
             process = self.orchestrator.run_experiment_on_instance(instance_id, experiment_name)
             
-            # Step 5: Wait for completion and stream output
+            # Step 6: Wait for completion and stream output
             for line in process.stdout:
                 self._log(f"[{experiment_name}] {line.rstrip()}")
             
@@ -106,7 +110,7 @@ class ParallelExperimentRunner:
             if return_code != 0:
                 raise RuntimeError(f"Experiment exited with code {return_code}")
             
-            # Step 6: Download results
+            # Step 7: Download results
             self._log(f"[{experiment_name}] Downloading results...")
             self.orchestrator.download_results(instance_id, self.results_dir)
             
